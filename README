@@ -1,0 +1,21 @@
+This pure WinAPI/MSVCRT-based library implements equivalents of the following
+functions:
+symlink()
+link()
+unlink()
+lstat()
+readlink()
+
+When compiled for Vista or later, it uses built-in CreateSymbolicLink() and
+related API functions. When compiled for XP, it tries to implement symbolic
+linking as best as it can with hardlinks (for files) and junction points (for
+directories).
+
+A small utility (junc.exe) is provided that is capable of creating/removing
+links and reading link information.
+
+Run make-mingw.cmd to compile.
+Run make-mingw.cmd DEBUG=1 to build debug version.
+Run make-mingw.cmd clean to remove compiled files.
+
+Requires GCC and win32api MinGW packages.
