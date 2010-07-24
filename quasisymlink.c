@@ -30,6 +30,10 @@ ntlink_symlink(const char *path1, const char *path2)
   wchar_t *wpath1 = NULL, *wpath2 = NULL;
   int exists;
   DWORD attributes;
+#if _WIN32_WINNT >= 0x0600
+  BOOL err;
+  DWORD lerr;
+#endif
 
   if (strtowchar (path1, &wpath1, CP_THREAD_ACP) < 0)
     goto fail;
@@ -59,12 +63,23 @@ ntlink_symlink(const char *path1, const char *path2)
     goto fail;
   }
 
+#if _WIN32_WINNT >= 0x0600
+  SetLastError (0);
+  err = CreateSymbolicLinkW (wpath2, wpath1, attributes & FILE_ATTRIBUTE_DIRECTORY != 0 ? 0 : SYMBOLIC_LINK_FLAG_DIRECTORY);
+  lerr = GetLastError ();
+  if (err == 0)
+  {
+    /* TODO: set errno properly from lerr */
+    errno = EIO;
+    goto fail;
+  }
+#else
   if (attributes & FILE_ATTRIBUTE_DIRECTORY)
   {
     /* Create a junction point to target directory */
     int err;
     wchar_t *wpath1_unp = NULL;
-    wpath1_unp = malloc (sizeof (wchar_t) * (wcslen (wpath1) + 1));
+    wpath1_unp = malloc (sizeof (wchar_t) * (wcslen (wpath1) + 1 + 4));
     memcpy (wpath1_unp, L"\\??\\", sizeof (wchar_t) * 4);
     memcpy (&wpath1_unp[4], wpath1, (wcslen (wpath1) + 1) * sizeof (wchar_t));
     err = SetJuncPointW (wpath1_unp, wpath2);
@@ -100,6 +115,7 @@ ntlink_symlink(const char *path1, const char *path2)
       goto fail;
     }
   }
+#endif
 
   free (wpath1);
   free (wpath2);
@@ -192,6 +208,10 @@ ntlink_lstat(const char *restrict path, struct _stat *restrict buf)
   int exists;
   int result = 0;
   DWORD attributes;
+#if _WIN32_WINNT >= 0x0600
+  HANDLE fileh = NULL;
+  DWORD lerr;
+#endif
 
   if (strtowchar (path, &wpath, CP_THREAD_ACP) < 0)
     goto fail;
@@ -207,6 +227,90 @@ ntlink_lstat(const char *restrict path, struct _stat *restrict buf)
     goto fail;
   }
 
+#if _WIN32_WINNT >= 0x0600
+  {
+    FILE_BASIC_INFO bi;
+    FILE_STANDARD_INFO stdi;
+    BY_HANDLE_FILE_INFORMATION info;
+
+    SetLastError (0);
+    fileh = CreateFileW (wpath, 0, FILE_SHARE_DELETE | FILE_SHARE_READ |
+        FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT,
+        NULL);
+    lerr = GetLastError ();
+    if (fileh == INVALID_HANDLE_VALUE)
+    {
+      /* TODO: set errno from GetLastError() */
+      errno = EIO;
+      goto fail;
+    }
+    SetLastError (0);
+    if (GetFileInformationByHandle(fileh, &info) == 0)
+    {
+      lerr = GetLastError ();
+      /* TODO: set errno from GetLastError () */
+      errno = EIO;
+      goto fail;
+    }
+    SetLastError (0);
+    if (fileh == INVALID_HANDLE_VALUE)
+    {
+      lerr = GetLastError ();
+      /* TODO: set errno from GetLastError () */
+      errno = EIO;
+      goto fail;
+    }
+    SetLastError (0);
+    if (GetFileInformationByHandleEx (fileh, FileBasicInfo, &bi, sizeof (bi)) == 0)
+    {
+      lerr = GetLastError ();
+      /* TODO: set errno from GetLastError () */
+      errno = EIO;
+      goto fail;
+    }
+    SetLastError (0);
+    if (GetFileInformationByHandleEx (fileh, FileStandardInfo, &stdi, sizeof (stdi)) == 0)
+    {
+      lerr = GetLastError ();
+      /* TODO: set errno from GetLastError () */
+      errno = EIO;
+      goto fail;
+    }
+    CloseHandle (fileh);
+    fileh = NULL;
+    buf->st_gid = 0;
+    buf->st_uid = 0;
+    /* buf->st_*time is either 32-bit or 64-bit integer */
+
+/*
+#st_mode
+#
+#    Bit mask for file-mode information. The _S_IFDIR bit is set if path specifies a directory;
+#    the _S_IFREG bit is set if path specifies an ordinary file or a device.
+#    User read/write bits are set according to the file's permission mode;
+#    user execute bits are set according to the filename extension.
+st_rdev
+
+    Drive number of the disk containing the file (same as st_dev).
+*/
+    buf->st_nlink = stdi.NumberOfLinks;
+    buf->st_mode = 0;
+    buf->st_mode |= bi.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT ? _S_IFLNK : 0;
+    buf->st_mode |= (bi.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !(bi.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ? _S_IFDIR : _S_IFREG;
+    buf->st_size = stdi.EndOfFile.QuadPart;
+    buf->st_dev = buf->st_rdev = info.dwVolumeSerialNumber;
+    buf->st_ino = ((info.nFileIndexHigh << sizeof(DWORD)) | info.nFileIndexLow);
+#ifdef _USE_32BIT_TIME_T
+    buf->st_atime = bi.LastAccessTime;
+    buf->st_ctime = bi.CreationTime;
+    buf->st_mtime = bi.LastWriteTime > bi.ChangeTime ? bi.LastWriteTime : bi.ChangeTime;
+#else
+    buf->st_atime = bi.LastAccessTime.LowPart;
+    buf->st_ctime = bi.CreationTime.LowPart;
+    buf->st_mtime = bi.LastWriteTime.LowPart > bi.ChangeTime.LowPart ? bi.LastWriteTime.LowPart : bi.ChangeTime.LowPart;
+#endif
+  }
+#else
   if (attributes & FILE_ATTRIBUTE_DIRECTORY)
   {
     /* Obtain juncpoint information and fill the buf */
@@ -236,11 +340,16 @@ ntlink_lstat(const char *restrict path, struct _stat *restrict buf)
     /* This is a hard link, use normal stat() */
     result = _wstat (wpath, buf);
   }
+#endif
 
   free (wpath);
 
   return result;
 fail:
+#if _WIN32_WINNT >= 0x0600
+  if (fileh != NULL)
+    CloseHandle (fileh);
+#endif
   if (wpath != NULL)
     free (wpath);
 
@@ -255,7 +364,11 @@ ntlink_readlink(const char *restrict path, char *restrict buf,
   int exists;
   int result = 0;
   DWORD attributes;
-
+#if _WIN32_WINNT >= 0x0600
+  HANDLE fileh = NULL;
+  wchar_t *wtarget = NULL;
+  DWORD lerr;
+#endif
   if (strtowchar (path, &wpath, CP_THREAD_ACP) < 0)
     goto fail;
 
@@ -270,8 +383,81 @@ ntlink_readlink(const char *restrict path, char *restrict buf,
     goto fail;
   }
 
+#if _WIN32_WINNT >= 0x0600
+  if (!(attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+  {
+    /* This is not a symlink */
+    errno = EINVAL;
+    goto fail;
+  }
+  else
+  {
+    DWORD required_size, required_size2;
+    char *target;
+    int len = 0;
+    int conv_result = 0;
+    SetLastError (0);
+    fileh = CreateFileW (wpath, GENERIC_READ, 0, NULL, OPEN_EXISTING, attributes & FILE_ATTRIBUTE_DIRECTORY ? FILE_FLAG_BACKUP_SEMANTICS : 0, NULL);
+    if (fileh == INVALID_HANDLE_VALUE)
+    {
+      lerr = GetLastError ();
+      /* TODO: set errno from GetLastError () */
+      errno = EIO;
+      goto fail;
+    }
+    SetLastError (0);
+    required_size = GetFinalPathNameByHandleW (fileh, (wchar_t *) &required_size, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    if (required_size == 0)
+    {
+      lerr = GetLastError ();
+      /* TODO: set errno from GetLastError () */
+      errno = EIO;
+      goto fail;
+    }
+    wtarget = (wchar_t *) malloc ((required_size) * sizeof (wchar_t));
+    if (wtarget == NULL)
+    {
+      errno = ENOMEM;
+      goto fail;
+    }
+    SetLastError (0);
+    required_size2 = GetFinalPathNameByHandleW (fileh, wtarget, required_size, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    if (required_size2 == 0)
+    {
+      lerr = GetLastError ();
+      /* TODO: set errno from GetLastError () */
+      errno = EIO;
+      goto fail;
+    }
+    if (required_size2 != required_size - 1)
+    {
+      /* TODO: Figure out what would that mean... */
+      errno = EIO;
+      goto fail;
+    }
+    CloseHandle (fileh);
+    fileh = NULL;
+    conv_result = wchartostr (wtarget, &target, CP_THREAD_ACP);
+    free (wtarget);
+    wtarget = NULL;
+    if (conv_result < 0)
+      goto fail;
+    len = strlen (target);
+    if (len > bufsize)
+      len = bufsize;
+    memcpy (buf, target, len);
+    free (target);
+    result = len;
+  }
+#else
   if (attributes & FILE_ATTRIBUTE_DIRECTORY)
   {
+    if (!(attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+    {
+      /* This is not a junction point */
+      errno = EINVAL;
+      goto fail;
+    }
     /* Obtain juncpoint information and fill the buf */
 
     /* FIXME: check that wpath is absolute */
@@ -313,11 +499,18 @@ ntlink_readlink(const char *restrict path, char *restrict buf,
     memcpy (buf, path, len);
     result = len;
   }
+#endif
 
   free (wpath);
 
   return result;
 fail:
+#if _WIN32_WINNT >= 0x0600
+  if (wtarget != NULL)
+    free (wtarget);
+  if (fileh != NULL)
+    CloseHandle (fileh);
+#endif
   if (wpath != NULL)
     free (wpath);
 
@@ -330,6 +523,7 @@ ntlink_unlink(const char *path)
   wchar_t *wpath = NULL;
   int exists;
   DWORD attributes;
+  DWORD lerr;
 
   if (strtowchar (path, &wpath, CP_THREAD_ACP) < 0)
     goto fail;
@@ -344,9 +538,30 @@ ntlink_unlink(const char *path)
       errno = EACCESS;
     goto fail;
   }
-
-  if (attributes & FILE_ATTRIBUTE_DIRECTORY)
+  if (attributes & FILE_ATTRIBUTE_REPARSE_POINT)
   {
+    BOOL bres;
+    SetLastError (0);
+    if (attributes & FILE_ATTRIBUTE_DIRECTORY)
+      bres = RemoveDirectoryW (wpath);
+    else
+      bres = DeleteFileW (wpath);
+    lerr = GetLastError ();
+    if (bres == 0)
+    {
+      /* TODO: Set errno from lerr */
+      errno = EIO;
+      goto fail;
+    }
+#if 0
+  } else if (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))
+  {
+
+/* This code is disabled, because unlink() is not required to leave an empty
+ * directory behind ('break link' behaviour), it is required to remove the link
+ * completely ('remove link' behaviour), and simple RemoveDirectory() will suffice.
+ */
+
     /* Unjunc that junction */
 
     /* FIXME: check that wpath is absolute */
@@ -365,36 +580,11 @@ ntlink_unlink(const char *path)
     default:
       ;
     }
+#endif
   }
   else if (attributes & FILE_ATTRIBUTE_NORMAL)
   {
-    /* This must be a hard link
-     * If the file is referenced somewhere else (linkcount > 1), delete it
-     * (remove @path and reduce link count by 1). Otherwise it becomes a
-     * difficult choice:
-     * 1) Follow unlink() logic for hard links and remove the last link,
-     * essentially deleting the file
-     * 2) Follow unlink() logic for symlinks and do nothing - as long as
-     * the application doesn't check that the file was deleted, we're good.
-     */
-    HANDLE hFile;
-    int firet = 0;
-    BY_HANDLE_FILE_INFORMATION fi;
-    hFile = CreateFileW (wpath, GENERIC_READ, 0, NULL,
-      OPEN_ALWAYS, 0, 0);
-    if (hFile == INVALID_HANDLE_VALUE)
-    {
-      goto fail;
-    }
-
-    firet = GetFileInformationByHandle (hFile, &fi);
-    CloseHandle (hFile);
-    if (firet == 0)
-      goto fail;
-    if (fi.nNumberOfLinks > 1)
-    {
-      _wunlink (wpath);
-    }
+    _wunlink (wpath);
   }
 
   free (wpath);

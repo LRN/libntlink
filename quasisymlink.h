@@ -31,6 +31,13 @@
   #define gid_t uid_t
 #endif
 
+#ifndef _S_IFLNK
+#define _S_IFLNK (_S_IFREG & _S_IFCHR)
+#endif
+#ifndef S_IFLNK
+#define S_IFLNK _S_IFLNK
+#endif
+
 int ntlink_symlink(const char *path1, const char *path2);
 int ntlink_lchown(const char *path, uid_t owner, gid_t group);
 int ntlink_link(const char *path1, const char *path2);

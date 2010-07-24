@@ -66,7 +66,6 @@ strtowchar (const char *str, wchar_t **wretstr, UINT cp)
     free (wstr);
     return -3;
   }
-  wstr[lenc] = 0;
   *wretstr = wstr;
   return 0;
 }
@@ -118,7 +117,6 @@ wchartostr (const wchar_t *wstr, char **retstr, UINT cp)
     free (str);
     return -3;
   }
-  str[lenc] = 0;
   *retstr = str;
   if (lossy)
     return 1;
