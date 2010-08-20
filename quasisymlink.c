@@ -30,6 +30,7 @@ ntlink_symlink(const char *path1, const char *path2)
   wchar_t *wpath1 = NULL, *wpath2 = NULL;
   int exists;
   DWORD attributes;
+  WIN32_FIND_DATAW finddata;
 #if _WIN32_WINNT >= 0x0600
   BOOL err;
   DWORD lerr;
@@ -40,7 +41,7 @@ ntlink_symlink(const char *path1, const char *path2)
   if (strtowchar (path2, &wpath2, CP_THREAD_ACP) < 0)
     goto fail;
 
-  exists = PathExistsW (wpath2, &attributes);
+  exists = PathExistsW (wpath2, &finddata);
   if (exists != 0)
   {
     if (exists > 0)
@@ -50,7 +51,7 @@ ntlink_symlink(const char *path1, const char *path2)
     goto fail;
   }
 
-  exists = PathExistsW (wpath1, &attributes);
+  exists = PathExistsW (wpath1, &finddata);
   if (exists <= 0)
   {
     /* Since we don't know anything about the target,
@@ -65,7 +66,7 @@ ntlink_symlink(const char *path1, const char *path2)
 
 #if _WIN32_WINNT >= 0x0600
   SetLastError (0);
-  err = CreateSymbolicLinkW (wpath2, wpath1, (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? 0 : SYMBOLIC_LINK_FLAG_DIRECTORY);
+  err = CreateSymbolicLinkW (wpath2, wpath1, (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? 0 : SYMBOLIC_LINK_FLAG_DIRECTORY);
   lerr = GetLastError ();
   if (err == 0)
   {
@@ -74,7 +75,7 @@ ntlink_symlink(const char *path1, const char *path2)
     goto fail;
   }
 #else
-  if (attributes & FILE_ATTRIBUTE_DIRECTORY)
+  if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
   {
     /* Create a junction point to target directory */
     int err;
@@ -104,7 +105,7 @@ ntlink_symlink(const char *path1, const char *path2)
       break;
     }
   }
-  else if (attributes & FILE_ATTRIBUTE_NORMAL)
+  else if (finddata.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
   {
     /* Create a hard link to target file */
     BOOL ret;
@@ -140,16 +141,16 @@ ntlink_lchown(const char *path, uid_t owner, gid_t group)
 int
 ntlink_link(const char *path1, const char *path2)
 {
-  wchar_t *wpath1 = NULL, *wpath2 = NULL;
+  wchar_t *wpath1 = NULL, *wpath2 = NULL/*, *wpath1_unp = NULL*/;
   int exists;
-  DWORD attributes;
+  WIN32_FIND_DATAW finddata;
 
   if (strtowchar (path1, &wpath1, CP_THREAD_ACP) < 0)
     goto fail;
   if (strtowchar (path2, &wpath2, CP_THREAD_ACP) < 0)
     goto fail;
 
-  exists = PathExistsW (wpath2, &attributes);
+  exists = PathExistsW (wpath2, &finddata);
   if (exists != 0)
   {
     if (exists > 0)
@@ -159,7 +160,7 @@ ntlink_link(const char *path1, const char *path2)
     goto fail;
   }
 
-  exists = PathExistsW (wpath1, &attributes);
+  exists = PathExistsW (wpath1, &finddata);
   if (exists <= 0)
   {
     /* path1 must exist */
@@ -170,13 +171,13 @@ ntlink_link(const char *path1, const char *path2)
     goto fail;
   }
 
-  if (attributes & FILE_ATTRIBUTE_DIRECTORY)
+  if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
   {
     /* This implementation does not support link() on directories */
     errno = EPERM;
     goto fail;
   }
-  else if (attributes & FILE_ATTRIBUTE_NORMAL)
+  else if (finddata.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
   {
     /* Create a hard link to target file */
     BOOL ret;
@@ -202,12 +203,13 @@ fail:
 }
 
 int
-ntlink_lstat(const char *restrict path, struct _stat *restrict buf)
+ntlink_lstat(const char *restrict path, struct stat *restrict buf)
 {
   wchar_t *wpath = NULL;
   int exists;
   int result = 0;
-  DWORD attributes;
+  WIN32_FIND_DATAW finddata;
+  wchar_t *abswpath = NULL;
 #if _WIN32_WINNT >= 0x0600
   HANDLE fileh = NULL;
   DWORD lerr;
@@ -216,7 +218,9 @@ ntlink_lstat(const char *restrict path, struct _stat *restrict buf)
   if (strtowchar (path, &wpath, CP_THREAD_ACP) < 0)
     goto fail;
 
-  exists = PathExistsW (wpath, &attributes);
+  GetAbsName (wpath, &abswpath);
+
+  exists = PathExistsW (wpath, &finddata);
   if (exists <= 0)
   {
     /* path1 must exist */
@@ -234,8 +238,7 @@ ntlink_lstat(const char *restrict path, struct _stat *restrict buf)
     BY_HANDLE_FILE_INFORMATION info;
 
     SetLastError (0);
-    fileh = CreateFileW (wpath, 0, FILE_SHARE_DELETE | FILE_SHARE_READ |
-        FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT,
+    fileh = CreateFileW (wpath, 0, 0, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | (bi.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? FILE_FLAG_BACKUP_SEMANTICS : 0,
         NULL);
     lerr = GetLastError ();
     if (fileh == INVALID_HANDLE_VALUE)
@@ -280,8 +283,6 @@ ntlink_lstat(const char *restrict path, struct _stat *restrict buf)
     fileh = NULL;
     buf->st_gid = 0;
     buf->st_uid = 0;
-    /* buf->st_*time is either 32-bit or 64-bit integer */
-
 /*
 #st_mode
 #
@@ -289,9 +290,6 @@ ntlink_lstat(const char *restrict path, struct _stat *restrict buf)
 #    the _S_IFREG bit is set if path specifies an ordinary file or a device.
 #    User read/write bits are set according to the file's permission mode;
 #    user execute bits are set according to the filename extension.
-st_rdev
-
-    Drive number of the disk containing the file (same as st_dev).
 */
     buf->st_nlink = stdi.NumberOfLinks;
     buf->st_mode = 0;
@@ -300,6 +298,7 @@ st_rdev
     buf->st_size = stdi.EndOfFile.QuadPart;
     buf->st_dev = buf->st_rdev = info.dwVolumeSerialNumber;
     buf->st_ino = ((info.nFileIndexHigh << sizeof(DWORD)) | info.nFileIndexLow);
+    /* buf->st_*time is either 32-bit or 64-bit integer */
 #ifdef _USE_32BIT_TIME_T
     buf->st_atime = bi.LastAccessTime;
     buf->st_ctime = bi.CreationTime;
@@ -311,13 +310,12 @@ st_rdev
 #endif
   }
 #else
-  if (attributes & FILE_ATTRIBUTE_DIRECTORY)
+  if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
   {
     /* Obtain juncpoint information and fill the buf */
 
-    /* FIXME: check that wpath is absolute */
     wchar_t *jptarget = NULL;
-    int jpresult = GetJuncPointW (&jptarget, wpath);
+    int jpresult = GetJuncPointW (&jptarget, abswpath);
     switch (jpresult)
     {
     case -1:
@@ -335,13 +333,15 @@ st_rdev
     buf->st_size = wcslen (jptarget);
     free (jptarget);
   }
-  else if (attributes & FILE_ATTRIBUTE_NORMAL)
+  else if (finddata.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
   {
     /* This is a hard link, use normal stat() */
     result = _wstat (wpath, buf);
   }
 #endif
 
+  if (abswpath != NULL)
+    free (abswpath);
   free (wpath);
 
   return result;
@@ -352,7 +352,8 @@ fail:
 #endif
   if (wpath != NULL)
     free (wpath);
-
+  if (abswpath != NULL)
+    free (abswpath);
   return -1;
 }
 
@@ -361,9 +362,10 @@ ntlink_readlink(const char *restrict path, char *restrict buf,
     size_t bufsize)
 {
   wchar_t *wpath = NULL;
+  wchar_t *abswpath = NULL;
   int exists;
   int result = 0;
-  DWORD attributes;
+  WIN32_FIND_DATAW finddata;
 #if _WIN32_WINNT >= 0x0600
   HANDLE fileh = NULL;
   wchar_t *wtarget = NULL;
@@ -372,7 +374,9 @@ ntlink_readlink(const char *restrict path, char *restrict buf,
   if (strtowchar (path, &wpath, CP_THREAD_ACP) < 0)
     goto fail;
 
-  exists = PathExistsW (wpath, &attributes);
+  GetAbsName (wpath, &abswpath);
+
+  exists = PathExistsW (wpath, &finddata);
   if (exists <= 0)
   {
     /* path1 must exist */
@@ -384,7 +388,7 @@ ntlink_readlink(const char *restrict path, char *restrict buf,
   }
 
 #if _WIN32_WINNT >= 0x0600
-  if (!(attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+  if (!(finddata.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
   {
     /* This is not a symlink */
     errno = EINVAL;
@@ -397,7 +401,7 @@ ntlink_readlink(const char *restrict path, char *restrict buf,
     int len = 0;
     int conv_result = 0;
     SetLastError (0);
-    fileh = CreateFileW (wpath, GENERIC_READ, 0, NULL, OPEN_EXISTING, attributes & FILE_ATTRIBUTE_DIRECTORY ? FILE_FLAG_BACKUP_SEMANTICS : 0, NULL);
+    fileh = CreateFileW (wpath, GENERIC_READ, 0, NULL, OPEN_EXISTING, finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ? FILE_FLAG_BACKUP_SEMANTICS : 0, NULL);
     if (fileh == INVALID_HANDLE_VALUE)
     {
       lerr = GetLastError ();
@@ -450,9 +454,9 @@ ntlink_readlink(const char *restrict path, char *restrict buf,
     result = len;
   }
 #else
-  if (attributes & FILE_ATTRIBUTE_DIRECTORY)
+  if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
   {
-    if (!(attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+    if (!(finddata.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
     {
       /* This is not a junction point */
       errno = EINVAL;
@@ -460,12 +464,11 @@ ntlink_readlink(const char *restrict path, char *restrict buf,
     }
     /* Obtain juncpoint information and fill the buf */
 
-    /* FIXME: check that wpath is absolute */
     wchar_t *wjptarget = NULL;
     char *jptarget = NULL;
     int len = 0;
     int conv_result = 0;
-    int jpresult = GetJuncPointW (&wjptarget, wpath);
+    int jpresult = GetJuncPointW (&wjptarget, abswpath);
     switch (jpresult)
     {
     case -1:
@@ -490,7 +493,7 @@ ntlink_readlink(const char *restrict path, char *restrict buf,
     memcpy (buf, jptarget, len);
     result = len;
   }
-  else if (attributes & FILE_ATTRIBUTE_NORMAL)
+  else if (finddata.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
   {
     /* This must be a hard link, return its own name */
     int len = strlen (path);
@@ -501,6 +504,8 @@ ntlink_readlink(const char *restrict path, char *restrict buf,
   }
 #endif
 
+  if (abswpath != NULL)
+    free (abswpath);
   free (wpath);
 
   return result;
@@ -513,6 +518,8 @@ fail:
 #endif
   if (wpath != NULL)
     free (wpath);
+  if (abswpath != NULL)
+    free (abswpath);
 
   return -1;
 }
@@ -522,13 +529,13 @@ ntlink_unlink(const char *path)
 {
   wchar_t *wpath = NULL;
   int exists;
-  DWORD attributes;
+  WIN32_FIND_DATAW finddata;
   DWORD lerr;
 
   if (strtowchar (path, &wpath, CP_THREAD_ACP) < 0)
     goto fail;
 
-  exists = PathExistsW (wpath, &attributes);
+  exists = PathExistsW (wpath, &finddata);
   if (exists <= 0)
   {
     /* path must exist */
@@ -538,11 +545,11 @@ ntlink_unlink(const char *path)
       errno = EACCESS;
     goto fail;
   }
-  if (attributes & FILE_ATTRIBUTE_REPARSE_POINT)
+  if (finddata.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
   {
     BOOL bres;
     SetLastError (0);
-    if (attributes & FILE_ATTRIBUTE_DIRECTORY)
+    if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
       bres = RemoveDirectoryW (wpath);
     else
       bres = DeleteFileW (wpath);
@@ -554,7 +561,7 @@ ntlink_unlink(const char *path)
       goto fail;
     }
 #if 0
-  } else if (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))
+  } else if (finddata.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))
   {
 
 /* This code is disabled, because unlink() is not required to leave an empty
@@ -564,7 +571,6 @@ ntlink_unlink(const char *path)
 
     /* Unjunc that junction */
 
-    /* FIXME: check that wpath is absolute */
     int jpresult = UnJuncPointW (wpath);
     switch (jpresult)
     {
@@ -582,7 +588,7 @@ ntlink_unlink(const char *path)
     }
 #endif
   }
-  else if (attributes & FILE_ATTRIBUTE_NORMAL)
+  else if (finddata.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
   {
     _wunlink (wpath);
   }

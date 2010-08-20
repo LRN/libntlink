@@ -126,21 +126,23 @@ wchartostr (const wchar_t *wstr, char **retstr, UINT cp)
 /**
  * PathExistsW:
  * @path: a path (UTF-16) to verify
- * @attributes: pointer to DWORD that will hold found file attributes. Can
- * be NULL.
+ * @finddata: pointer to WIN32_FIND_DATAW that will hold the information
+ * about the file found. Can be NULL.
  *
  * Tries to find a file or directory pointed by @path.
- * If the searh succeeds, fills *@attributes with the file attributes.
- * Use FILE_ATTRIBUTE_* constants to determine file type.
- * If file does not exist, *@attributes remains unchanged.
+ * If the searh succeeds, fills *@finddata with the file information.
+ * Use FILE_ATTRIBUTE_* constants on @finddata->dwFileAttributes to
+ * determine file type.
+ * @finddata->cFileName will contain absolute file name.
+ * If file does not exist, *@finddata remains unchanged.
  *
  * Returns:
- * -1 - the search failed
+ * -1 - the search have failed
  *  0 - file/directory does not exist
  *  1 - file/directory exists
  */
 int
-PathExistsW (wchar_t *path, DWORD *attributes)
+PathExistsW (wchar_t *path, WIN32_FIND_DATAW *finddata)
 {
   HANDLE findhandle;
   WIN32_FIND_DATAW finddataw;
@@ -153,7 +155,78 @@ PathExistsW (wchar_t *path, DWORD *attributes)
     return -1;
   }
   FindClose (findhandle);
-  if (attributes != NULL)
-    *attributes = finddataw.dwFileAttributes;
+  if (finddata != NULL)
+  {
+    *finddata = finddataw;
+  }
   return 1;
+}
+
+/**
+ * IsAbsName:
+ * @name: a filesystem name (UTF-16) to check
+ *
+ * Decides whether the name is an absolute path or not.
+ *
+ * Returns:
+ *  0 - name is not absolute
+ *  1 - name is absolute
+ */
+int
+IsAbsName (wchar_t *name)
+{
+  if (name[0] != L'\0' && name[1] != L'\0')
+  {
+    if (name[0] == L'\\' && name[1] == L'\\')
+      return 1;
+    if (name[2] != L'\0' && name[0] >= L'A' && name[0] <= L'z' && name[1] == L':' && (name[2] == L'\\' || name[2] == L'/'))
+      return 1;
+  }
+  return 0;
+}
+
+/**
+ * GetAbsName:
+ * @relative: a supposedly relative filesystem name (UTF-16)
+ * @absolute: a pointer to a wchar_t * that receives the result
+ *
+ * Makes absolute name out of a relative one.
+ * *@absolute is not modified in case of failure
+ * *@absolute is allocated internally and must be freed with free()
+ *
+ * Returns:
+ *  0 - success
+ * -1 - failed to obtain current directory
+ * -2 - failed to allocate memory
+ */
+int
+GetAbsName (wchar_t *relative, wchar_t **absolute)
+{
+  wchar_t tmp[MAX_PATH];
+  wchar_t *tmpptr;
+  if (relative == NULL)
+    return -1;
+  if (IsAbsName (relative))
+    tmpptr = wcsdup (relative);
+  else if (GetFullPathNameW (relative, MAX_PATH, tmp, NULL) <= 0)
+  {
+    DWORD dirlen = GetCurrentDirectoryW (MAX_PATH, tmp);
+    if (dirlen > 0)
+    {
+      wcsncat (tmp, L"\\", MAX_PATH - dirlen);
+      wcsncat (tmp, relative, MAX_PATH - dirlen - 1);
+      tmpptr = wcsdup (tmp);
+    }
+    else
+      return -1;
+  }
+  else
+    tmpptr = wcsdup (tmp);
+  if (tmpptr != NULL)
+  {
+    *absolute = tmpptr;
+    return 0;
+  }
+  else
+    return -2;
 }

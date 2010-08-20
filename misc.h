@@ -25,7 +25,9 @@
 
 int strtowchar (const char *str, wchar_t **wretstr, UINT cp);
 int wchartostr (const wchar_t *wstr, char **retstr, UINT cp);
-int PathExistsW (wchar_t *path, DWORD *attributes);
+int PathExistsW (wchar_t *path, WIN32_FIND_DATAW *finddata);
+int IsAbsName (wchar_t *name);
+int GetAbsName (wchar_t *relative, wchar_t **absolute);
 
 #define NTLINK_ERROR_BASE 100
 
