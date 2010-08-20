@@ -10,7 +10,7 @@ DEBUG_CFLAGS = $(SPEC_CFLAGS) -O0 -g
 else
 DEBUG_CFLAGS = $(SPEC_CFLAGS) -O3
 endif
-LOCAL_CFLAGS = $(DEBUG_CFLAGS) -fno-common -Wno-format -mms-bitfields -D_WIN32_WINNT=0x500
+LOCAL_CFLAGS = $(DEBUG_CFLAGS) -fno-common -Wall -mms-bitfields -D_WIN32_WINNT=0x600
 NTLINK_SHARED = libntlink.$(SOSUF)
 NTLINK_STATIC = libntlink.$(ASUF)
 JUNC_NAME = junc.$(EXESUF)

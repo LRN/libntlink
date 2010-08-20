@@ -65,7 +65,7 @@ ntlink_symlink(const char *path1, const char *path2)
 
 #if _WIN32_WINNT >= 0x0600
   SetLastError (0);
-  err = CreateSymbolicLinkW (wpath2, wpath1, attributes & FILE_ATTRIBUTE_DIRECTORY != 0 ? 0 : SYMBOLIC_LINK_FLAG_DIRECTORY);
+  err = CreateSymbolicLinkW (wpath2, wpath1, (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? 0 : SYMBOLIC_LINK_FLAG_DIRECTORY);
   lerr = GetLastError ();
   if (err == 0)
   {
@@ -140,7 +140,7 @@ ntlink_lchown(const char *path, uid_t owner, gid_t group)
 int
 ntlink_link(const char *path1, const char *path2)
 {
-  wchar_t *wpath1 = NULL, *wpath2 = NULL, *wpath1_unp = NULL;
+  wchar_t *wpath1 = NULL, *wpath2 = NULL;
   int exists;
   DWORD attributes;
 

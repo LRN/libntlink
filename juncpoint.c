@@ -269,8 +269,7 @@ UnJuncPointW (wchar_t *path)
   BOOL ret;
   REPARSE_DATA_BUFFER *rep_buf;
   size_t len1, len2, reparse_size;
-  BYTE returned_data[MAXIMUM_REPARSE_DATA_BUFFER_SIZE];
-  DWORD returned_bytes1, returned_bytes2;
+  DWORD returned_bytes2;
 
   len1 = wcslen (path);
   len2 = 0;
