@@ -45,23 +45,24 @@
 #endif
 
 #ifndef lstat
-#define lstat(a,b) ntlink_lstat(a,b)
+#define lstat ntlink_lstat
 #endif
 #ifndef symlink
-#define symlink(a,b) ntlink_symlink(a,b)
+#define symlink ntlink_symlink
 #endif
 #ifndef lchown
-#define lchown(a,b,c) ntlink_lchown(a,b,c)
+#define lchown ntlink_lchown
 #endif
 #ifndef link
-#define link(a,b) ntlink_link(a,b)
+#define link ntlink_link
 #endif
 #ifndef readlink
-#define readlink(a,b,c) ntlink_readlink(a,b,c)
+#define readlink ntlink_readlink
 #endif
 #ifndef unlink
-#define unlink(a) ntlink_unlink(a)
+#define unlink ntlink_unlink
 #endif
+#define rename ntlink_rename
 
 int ntlink_symlink(const char *path1, const char *path2);
 int ntlink_lchown(const char *path, uid_t owner, gid_t group);
@@ -70,5 +71,6 @@ int ntlink_lstat(const char *restrict path, struct stat *restrict buf);
 ssize_t ntlink_readlink(const char *restrict path, char *restrict buf,
     size_t bufsize);
 int ntlink_unlink(const char *path);
+int ntlink_rename(const char *path1, const char *path2);
 
 #endif /* __NTLINK_SYMLINK_H__ */

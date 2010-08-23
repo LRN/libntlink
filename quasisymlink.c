@@ -19,15 +19,15 @@
 
 #include <unistd.h>
 #include <windows.h>
+#include <direct.h>
 
 #include "quasisymlink.h"
 #include "misc.h"
 #include "juncpoint.h"
 
 int
-ntlink_symlink(const char *path1, const char *path2)
+ntlink_symlinkw(const wchar_t *wpath1, const wchar_t *wpath2)
 {
-  wchar_t *wpath1 = NULL, *wpath2 = NULL;
   int exists;
   DWORD attributes;
   WIN32_FIND_DATAW finddata;
@@ -36,12 +36,7 @@ ntlink_symlink(const char *path1, const char *path2)
   DWORD lerr;
 #endif
 
-  if (strtowchar (path1, &wpath1, CP_THREAD_ACP) < 0)
-    goto fail;
-  if (strtowchar (path2, &wpath2, CP_THREAD_ACP) < 0)
-    goto fail;
-
-  exists = PathExistsW (wpath2, &finddata);
+  exists = PathExistsW ((wchar_t *) wpath2, &finddata);
   if (exists != 0)
   {
     if (exists > 0)
@@ -51,7 +46,7 @@ ntlink_symlink(const char *path1, const char *path2)
     goto fail;
   }
 
-  exists = PathExistsW (wpath1, &finddata);
+  exists = PathExistsW ((wchar_t *) wpath1, &finddata);
   if (exists <= 0)
   {
     /* Since we don't know anything about the target,
@@ -66,7 +61,7 @@ ntlink_symlink(const char *path1, const char *path2)
 
 #if _WIN32_WINNT >= 0x0600
   SetLastError (0);
-  err = CreateSymbolicLinkW (wpath2, wpath1, (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? 0 : SYMBOLIC_LINK_FLAG_DIRECTORY);
+  err = CreateSymbolicLinkW ((wchar_t *) wpath2, (wchar_t *) wpath1, (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? 0 : SYMBOLIC_LINK_FLAG_DIRECTORY);
   lerr = GetLastError ();
   if (err == 0)
   {
@@ -118,10 +113,29 @@ ntlink_symlink(const char *path1, const char *path2)
   }
 #endif
 
+  return 0;
+fail:
+
+  return -1;
+}
+
+int
+ntlink_symlink(const char *path1, const char *path2)
+{
+  int ret;
+  wchar_t *wpath1 = NULL, *wpath2 = NULL;
+
+  if (strtowchar (path1, &wpath1, CP_THREAD_ACP) < 0)
+    goto fail;
+  if (strtowchar (path2, &wpath2, CP_THREAD_ACP) < 0)
+    goto fail;
+
+  ret = ntlink_symlinkw (wpath1, wpath2);
+
   free (wpath1);
   free (wpath2);
 
-  return 0;
+  return ret;
 fail:
   if (wpath1 != NULL)
     free (wpath1);
@@ -139,18 +153,12 @@ ntlink_lchown(const char *path, uid_t owner, gid_t group)
 }
 
 int
-ntlink_link(const char *path1, const char *path2)
+ntlink_linkw(const wchar_t *wpath1, const wchar_t *wpath2)
 {
-  wchar_t *wpath1 = NULL, *wpath2 = NULL/*, *wpath1_unp = NULL*/;
   int exists;
   WIN32_FIND_DATAW finddata;
 
-  if (strtowchar (path1, &wpath1, CP_THREAD_ACP) < 0)
-    goto fail;
-  if (strtowchar (path2, &wpath2, CP_THREAD_ACP) < 0)
-    goto fail;
-
-  exists = PathExistsW (wpath2, &finddata);
+  exists = PathExistsW ((wchar_t *) wpath2, &finddata);
   if (exists != 0)
   {
     if (exists > 0)
@@ -160,7 +168,7 @@ ntlink_link(const char *path1, const char *path2)
     goto fail;
   }
 
-  exists = PathExistsW (wpath1, &finddata);
+  exists = PathExistsW ((wchar_t *) wpath1, &finddata);
   if (exists <= 0)
   {
     /* path1 must exist */
@@ -177,11 +185,11 @@ ntlink_link(const char *path1, const char *path2)
     errno = EPERM;
     goto fail;
   }
-  else if (finddata.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
+  else
   {
     /* Create a hard link to target file */
     BOOL ret;
-    ret = CreateHardLinkW (wpath2, wpath1, NULL);
+    ret = CreateHardLinkW ((wchar_t *) wpath2, (wchar_t *) wpath1, NULL);
     if (ret == 0)
     {
       errno = EIO;
@@ -189,10 +197,28 @@ ntlink_link(const char *path1, const char *path2)
     }
   }
 
+  return 0;
+fail:
+  return -1;
+}
+
+int
+ntlink_link(const char *path1, const char *path2)
+{
+  int ret;
+  wchar_t *wpath1 = NULL, *wpath2 = NULL/*, *wpath1_unp = NULL*/;
+
+  if (strtowchar (path1, &wpath1, CP_THREAD_ACP) < 0)
+    goto fail;
+  if (strtowchar (path2, &wpath2, CP_THREAD_ACP) < 0)
+    goto fail;
+
+  ret = ntlink_linkw (wpath1, wpath2);
+
   free (wpath1);
   free (wpath2);
 
-  return 0;
+  return ret;
 fail:
   if (wpath1 != NULL)
     free (wpath1);
@@ -203,9 +229,8 @@ fail:
 }
 
 int
-ntlink_lstat(const char *restrict path, struct stat *restrict buf)
+ntlink_lstatw(const wchar_t *restrict wpath, struct stat *restrict buf)
 {
-  wchar_t *wpath = NULL;
   int exists;
   int result = 0;
   WIN32_FIND_DATAW finddata;
@@ -215,12 +240,9 @@ ntlink_lstat(const char *restrict path, struct stat *restrict buf)
   DWORD lerr;
 #endif
 
-  if (strtowchar (path, &wpath, CP_THREAD_ACP) < 0)
-    goto fail;
+  GetAbsName ((wchar_t *) wpath, &abswpath);
 
-  GetAbsName (wpath, &abswpath);
-
-  exists = PathExistsW (wpath, &finddata);
+  exists = PathExistsW ((wchar_t *) wpath, &finddata);
   if (exists <= 0)
   {
     /* path1 must exist */
@@ -342,7 +364,6 @@ ntlink_lstat(const char *restrict path, struct stat *restrict buf)
 
   if (abswpath != NULL)
     free (abswpath);
-  free (wpath);
 
   return result;
 fail:
@@ -350,18 +371,36 @@ fail:
   if (fileh != NULL)
     CloseHandle (fileh);
 #endif
-  if (wpath != NULL)
-    free (wpath);
   if (abswpath != NULL)
     free (abswpath);
   return -1;
 }
 
+
+int
+ntlink_lstat(const char *restrict path, struct stat *restrict buf)
+{
+  int ret;
+  wchar_t *wpath = NULL;
+
+  if (strtowchar (path, &wpath, CP_THREAD_ACP) < 0)
+    goto fail;
+
+  ret = ntlink_lstatw (wpath, buf);
+
+  free (wpath);
+
+  return ret;
+fail:
+  if (wpath != NULL)
+    free (wpath);
+  return -1;
+}
+
 ssize_t
-ntlink_readlink(const char *restrict path, char *restrict buf,
+ntlink_readlinkw(const wchar_t *restrict wpath, wchar_t *restrict buf,
     size_t bufsize)
 {
-  wchar_t *wpath = NULL;
   wchar_t *abswpath = NULL;
   int exists;
   int result = 0;
@@ -371,12 +410,10 @@ ntlink_readlink(const char *restrict path, char *restrict buf,
   wchar_t *wtarget = NULL;
   DWORD lerr;
 #endif
-  if (strtowchar (path, &wpath, CP_THREAD_ACP) < 0)
-    goto fail;
 
-  GetAbsName (wpath, &abswpath);
+  GetAbsName ((wchar_t *) wpath, &abswpath);
 
-  exists = PathExistsW (wpath, &finddata);
+  exists = PathExistsW ((wchar_t *) wpath, &finddata);
   if (exists <= 0)
   {
     /* path1 must exist */
@@ -496,17 +533,16 @@ ntlink_readlink(const char *restrict path, char *restrict buf,
   else if (finddata.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
   {
     /* This must be a hard link, return its own name */
-    int len = strlen (path);
+    int len = wcslen (wpath);
     if (len > bufsize)
       len = bufsize;
-    memcpy (buf, path, len);
+    memcpy (buf, wpath, len * sizeof (wchar_t));
     result = len;
   }
 #endif
 
   if (abswpath != NULL)
     free (abswpath);
-  free (wpath);
 
   return result;
 fail:
@@ -516,26 +552,63 @@ fail:
   if (fileh != NULL)
     CloseHandle (fileh);
 #endif
-  if (wpath != NULL)
-    free (wpath);
   if (abswpath != NULL)
     free (abswpath);
 
   return -1;
 }
 
-int
-ntlink_unlink(const char *path)
+
+ssize_t
+ntlink_readlink(const char *restrict path, char *restrict buf,
+    size_t bufsize)
 {
+  int ret;
   wchar_t *wpath = NULL;
-  int exists;
-  WIN32_FIND_DATAW finddata;
-  DWORD lerr;
+  wchar_t *wbuf = NULL;
 
   if (strtowchar (path, &wpath, CP_THREAD_ACP) < 0)
     goto fail;
 
-  exists = PathExistsW (wpath, &finddata);
+  if (bufsize > 0)
+    wbuf = (wchar_t *) malloc (sizeof (wchar_t) * bufsize);
+
+  ret = ntlink_readlinkw (wpath, wbuf, bufsize);
+
+  free (wpath);
+
+  if (bufsize > 0)
+  {
+    if (ret == 0)
+    {
+      char *tmp;
+      if (wchartostr (wbuf, &tmp, CP_THREAD_ACP) < 0)
+        ret = -1;
+      else
+      {
+        strncpy (buf, tmp, bufsize);
+        free (tmp);
+      }
+    }
+    free (wbuf);
+  }
+
+  return ret;
+fail:
+  if (wpath != NULL)
+    free (wpath);
+
+  return -1;
+}
+
+int
+ntlink_unlinkw(const wchar_t *wpath)
+{
+  int exists;
+  WIN32_FIND_DATAW finddata;
+  DWORD lerr;
+
+  exists = PathExistsW ((wchar_t *) wpath, &finddata);
   if (exists <= 0)
   {
     /* path must exist */
@@ -588,17 +661,145 @@ ntlink_unlink(const char *path)
     }
 #endif
   }
-  else if (finddata.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
+  else if (~finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
   {
     _wunlink (wpath);
   }
+  else if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+  {
+    _wrmdir (wpath);
+  }
+
+  return 0;
+fail:
+  return -1;
+}
+
+
+int
+ntlink_unlink(const char *path)
+{
+  int ret;
+  wchar_t *wpath = NULL;
+
+  if (strtowchar (path, &wpath, CP_THREAD_ACP) < 0)
+    goto fail;
+
+  ret = ntlink_unlinkw (wpath);
 
   free (wpath);
 
-  return 0;
+  return ret;
 fail:
   if (wpath != NULL)
     free (wpath);
 
   return -1;
+}
+
+int ntlink_renamew(const wchar_t *wpath1, const wchar_t *wpath2)
+{
+  int exists;
+  struct stat stat1, stat2;
+  WIN32_FIND_DATAW finddata1, finddata2;
+
+  memset (&stat1, 0, sizeof (stat1));
+  memset (&stat2, 0, sizeof (stat2));
+
+  ntlink_lstatw (wpath1, &stat1);
+  ntlink_lstatw (wpath2, &stat2);
+
+  /* If the old argument and the new argument resolve to the same existing file, rename() shall return successfully and perform no other action. */
+  if (stat1.st_ino != 0 && stat1.st_ino == stat2.st_ino)
+    return 0;
+
+  exists = PathExistsW ((wchar_t *) wpath1, &finddata1);
+  if (exists <= 0)
+  {
+    /* path1 must exist */
+    if (exists > 0)
+      errno = ENOENT;
+    else
+      errno = EACCESS;
+    goto fail;
+  }
+
+  exists = PathExistsW ((wchar_t *) wpath2, &finddata2);
+  if (exists > 0)
+  {
+    /* If the old argument points to the pathname of a directory, the new argument shall not point to the pathname of a file that is not a directory. */
+    if ((finddata1.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY && !(finddata2.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)))
+    {
+      errno = ENOTDIR;
+      goto fail;
+    }
+    /* If the old argument points to the pathname of a file that is not a directory, the new argument shall not point to the pathname of a directory. */
+    if ((~finddata1.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY && !(~finddata2.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)))
+    {
+      errno = EISDIR;
+      goto fail;
+    }
+
+    /* If the directory named by the new argument exists, it shall be removed and old renamed to new. */
+    /* ntlink_unlink() removes a directory */
+
+    /* If the link named by the new argument exists, it shall be removed and old renamed to new. */
+    /* ntlink_unlink() removes a file*/
+
+    /* If new names an existing directory, it shall be required to be an empty directory.*/
+    /* ntlink_unlink() does not remove non-empty directories, fails with ENOTEMPTY */
+
+    /* If the new argument points to a pathname of a symbolic link, the symbolic link shall be removed. */
+    if (ntlink_unlinkw (wpath2) != 0)
+      goto fail;
+  }
+
+  /* If the old argument points to a pathname of a symbolic link, the symbolic link shall be renamed. */
+  /* TODO: make sure that this is what really happens */
+
+  /* The new pathname shall not contain a path prefix that names old. */
+  /* Hope that MoveFileEx will figure this out */
+
+  /* If the rename() function fails for any reason other than [EIO], any file named by new shall be unaffected. */
+  /* Can't see this happening. We can't tell MoveFileEx to remove the existing directory */
+
+  /* TODO: MoveFileEx can't move directories between drives, fix that */
+  if (MoveFileExW (wpath1, wpath2, MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH) == 0)
+  {
+    DWORD err = GetLastError ();
+    /*FIXME: set errno from GetLastError()*/
+    errno = EINVAL;
+    goto fail;
+  }
+
+  return 0;
+fail:
+  return -1;
+}
+
+int ntlink_rename(const char *path1, const char *path2)
+{
+  int ret;
+  wchar_t *wpath1 = NULL, *wpath2 = NULL;
+
+  if (strtowchar (path1, &wpath1, CP_THREAD_ACP) < 0)
+    goto fail;
+  if (strtowchar (path2, &wpath2, CP_THREAD_ACP) < 0)
+    goto fail;
+
+  ret = ntlink_renamew (wpath1, wpath2);
+
+  free (wpath1);
+  free (wpath2);
+
+  return ret;
+
+fail:
+  if (wpath1 != NULL)
+    free (wpath1);
+  if (wpath2 != NULL)
+    free (wpath2);
+
+  return -1;
+
 }
