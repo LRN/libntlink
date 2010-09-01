@@ -23,9 +23,22 @@
 #include <windows.h>
 #include <errno.h>
 
-int strtowchar (const char *str, wchar_t **wretstr, UINT cp);
-int wchartostr (const wchar_t *wstr, char **retstr, UINT cp);
-int PathExistsW (wchar_t *path, WIN32_FIND_DATAW *finddata);
+/**
+ * PathExistsFlags:
+ * @PATH_EXISTS_FLAG_NOTHING: default behaviour
+ * @PATH_EXISTS_FLAG_DONT_FOLLOW_SYMLINKS: don't resolve intermediate symlinks
+ * @PATH_EXISTS_FLAG_DONT_FOLLOW_LAST_SYMLINK: don't resolve the last symlink
+ *
+ * See PathExistsW() for details.
+ */
+typedef enum
+{
+  PATH_EXISTS_FLAG_NOTHING                  = 0x00000000,
+  PATH_EXISTS_FLAG_DONT_FOLLOW_SYMLINKS     = 0x00000001,
+  PATH_EXISTS_FLAG_FOLLOW_LAST_SYMLINK      = 0x00000002,
+} PathExistsFlags;
+
+int PathExistsW (wchar_t *path, WIN32_FIND_DATAW *finddata, PathExistsFlags flags);
 int IsAbsName (wchar_t *name);
 int GetAbsName (wchar_t *relative, wchar_t **absolute);
 

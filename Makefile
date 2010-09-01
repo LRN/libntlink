@@ -14,8 +14,8 @@ LOCAL_CFLAGS = $(DEBUG_CFLAGS) -fno-common -Wall -mms-bitfields -D_WIN32_WINNT=0
 NTLINK_SHARED = libntlink.$(SOSUF)
 NTLINK_STATIC = libntlink.$(ASUF)
 JUNC_NAME = junc.$(EXESUF)
-NTLINK_FILES = juncpoint.c quasisymlink.c misc.c
-NTLINK_HEADERS = quasisymlink.h juncpoint.h misc.h
+NTLINK_FILES = juncpoint.c quasisymlink.c misc.c extra_string.c
+NTLINK_HEADERS = quasisymlink.h juncpoint.h misc.h extra_string.h
 JUNC_FILES = junc.c
 NTLINK_OBJECT_FILES = $(patsubst %.c,%.o,$(NTLINK_FILES))
 JUNC_OBJECT_FILES = $(patsubst %.c,%.o,$(JUNC_FILES))
@@ -41,7 +41,7 @@ else
 endif
 
 %.o: %.c
-	$(CC) -std=c99 $(LOCAL_CFLAGS) -o $@ -c $< 
+	$(CC) $(LOCAL_CFLAGS) -o $@ -c $<
 
 $(NTLINK_SHARED): $(NTLINK_OBJECT_FILES)
 ifeq ($(ENV),mingw-cmd)

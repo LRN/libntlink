@@ -67,10 +67,19 @@
 int ntlink_symlink(const char *path1, const char *path2);
 int ntlink_lchown(const char *path, uid_t owner, gid_t group);
 int ntlink_link(const char *path1, const char *path2);
-int ntlink_lstat(const char *restrict path, struct stat *restrict buf);
-ssize_t ntlink_readlink(const char *restrict path, char *restrict buf,
+int ntlink_lstat(const char *path, struct stat *buf);
+ssize_t ntlink_readlink(const char *path, char *buf,
     size_t bufsize);
 int ntlink_unlink(const char *path);
 int ntlink_rename(const char *path1, const char *path2);
+
+int ntlink_symlinkw(const wchar_t *path1, const wchar_t *path2);
+int ntlink_lchownw(const wchar_t *path, uid_t owner, gid_t group);
+int ntlink_linkw(const wchar_t *path1, const wchar_t *path2);
+int ntlink_lstatw(const wchar_t *path, struct stat *buf);
+ssize_t ntlink_readlinkw(const wchar_t *path, wchar_t *buf,
+    size_t bufsize);
+int ntlink_unlinkw(const wchar_t *path);
+int ntlink_renamew(const wchar_t *path1, const wchar_t *path2);
 
 #endif /* __NTLINK_SYMLINK_H__ */

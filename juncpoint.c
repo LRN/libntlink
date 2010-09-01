@@ -24,7 +24,8 @@
 #include <windows.h>
 #include <winioctl.h>
 
-#include <misc.h>
+#include "misc.h"
+#include "extra_string.h"
 
 /**
  * utf8towchar:
@@ -188,7 +189,7 @@ SetJuncPointW (wchar_t *path1, wchar_t *path2)
   len1 = wcslen (path1);
   len2 = 0;
 
-  if (PathExistsW (path2, NULL) <= 0)
+  if (PathExistsW (path2, NULL, PATH_EXISTS_FLAG_NOTHING) <= 0)
   {
     if (CreateDirectoryW (path2, NULL) == 0)
     {

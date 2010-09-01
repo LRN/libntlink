@@ -20,8 +20,10 @@
 #include <unistd.h>
 #include <windows.h>
 #include <direct.h>
+#include <stdio.h>
 
 #include "quasisymlink.h"
+#include "extra_string.h"
 #include "misc.h"
 #include "juncpoint.h"
 
@@ -29,14 +31,13 @@ int
 ntlink_symlinkw(const wchar_t *wpath1, const wchar_t *wpath2)
 {
   int exists;
-  DWORD attributes;
   WIN32_FIND_DATAW finddata;
 #if _WIN32_WINNT >= 0x0600
   BOOL err;
   DWORD lerr;
 #endif
 
-  exists = PathExistsW ((wchar_t *) wpath2, &finddata);
+  exists = PathExistsW ((wchar_t *) wpath2, &finddata, PATH_EXISTS_FLAG_NOTHING);
   if (exists != 0)
   {
     if (exists > 0)
@@ -46,7 +47,7 @@ ntlink_symlinkw(const wchar_t *wpath1, const wchar_t *wpath2)
     goto fail;
   }
 
-  exists = PathExistsW ((wchar_t *) wpath1, &finddata);
+  exists = PathExistsW ((wchar_t *) wpath1, &finddata, PATH_EXISTS_FLAG_NOTHING);
   if (exists <= 0)
   {
     /* Since we don't know anything about the target,
@@ -158,7 +159,7 @@ ntlink_linkw(const wchar_t *wpath1, const wchar_t *wpath2)
   int exists;
   WIN32_FIND_DATAW finddata;
 
-  exists = PathExistsW ((wchar_t *) wpath2, &finddata);
+  exists = PathExistsW ((wchar_t *) wpath2, &finddata, PATH_EXISTS_FLAG_NOTHING);
   if (exists != 0)
   {
     if (exists > 0)
@@ -168,7 +169,7 @@ ntlink_linkw(const wchar_t *wpath1, const wchar_t *wpath2)
     goto fail;
   }
 
-  exists = PathExistsW ((wchar_t *) wpath1, &finddata);
+  exists = PathExistsW ((wchar_t *) wpath1, &finddata, PATH_EXISTS_FLAG_NOTHING);
   if (exists <= 0)
   {
     /* path1 must exist */
@@ -229,7 +230,7 @@ fail:
 }
 
 int
-ntlink_lstatw(const wchar_t *restrict wpath, struct stat *restrict buf)
+ntlink_lstatw(const wchar_t *wpath, struct stat *buf)
 {
   int exists;
   int result = 0;
@@ -242,7 +243,7 @@ ntlink_lstatw(const wchar_t *restrict wpath, struct stat *restrict buf)
 
   GetAbsName ((wchar_t *) wpath, &abswpath);
 
-  exists = PathExistsW ((wchar_t *) wpath, &finddata);
+  exists = PathExistsW ((wchar_t *) wpath, &finddata, PATH_EXISTS_FLAG_NOTHING);
   if (exists <= 0)
   {
     /* path1 must exist */
@@ -378,7 +379,7 @@ fail:
 
 
 int
-ntlink_lstat(const char *restrict path, struct stat *restrict buf)
+ntlink_lstat(const char *path, struct stat *buf)
 {
   int ret;
   wchar_t *wpath = NULL;
@@ -398,7 +399,7 @@ fail:
 }
 
 ssize_t
-ntlink_readlinkw(const wchar_t *restrict wpath, wchar_t *restrict buf,
+ntlink_readlinkw(const wchar_t *wpath, wchar_t *buf,
     size_t bufsize)
 {
   wchar_t *abswpath = NULL;
@@ -413,7 +414,7 @@ ntlink_readlinkw(const wchar_t *restrict wpath, wchar_t *restrict buf,
 
   GetAbsName ((wchar_t *) wpath, &abswpath);
 
-  exists = PathExistsW ((wchar_t *) wpath, &finddata);
+  exists = PathExistsW ((wchar_t *) wpath, &finddata, PATH_EXISTS_FLAG_NOTHING);
   if (exists <= 0)
   {
     /* path1 must exist */
@@ -438,7 +439,7 @@ ntlink_readlinkw(const wchar_t *restrict wpath, wchar_t *restrict buf,
     int len = 0;
     int conv_result = 0;
     SetLastError (0);
-    fileh = CreateFileW (wpath, GENERIC_READ, 0, NULL, OPEN_EXISTING, finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ? FILE_FLAG_BACKUP_SEMANTICS : 0, NULL);
+    fileh = CreateFileW (wpath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ? FILE_FLAG_BACKUP_SEMANTICS : 0, NULL);
     if (fileh == INVALID_HANDLE_VALUE)
     {
       lerr = GetLastError ();
@@ -446,6 +447,7 @@ ntlink_readlinkw(const wchar_t *restrict wpath, wchar_t *restrict buf,
       errno = EIO;
       goto fail;
     }
+
     SetLastError (0);
     required_size = GetFinalPathNameByHandleW (fileh, (wchar_t *) &required_size, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
     if (required_size == 0)
@@ -478,16 +480,18 @@ ntlink_readlinkw(const wchar_t *restrict wpath, wchar_t *restrict buf,
     }
     CloseHandle (fileh);
     fileh = NULL;
+/*
     conv_result = wchartostr (wtarget, &target, CP_THREAD_ACP);
     free (wtarget);
     wtarget = NULL;
     if (conv_result < 0)
       goto fail;
-    len = strlen (target);
+*/
+    len = wcslen (wtarget);
     if (len > bufsize)
       len = bufsize;
-    memcpy (buf, target, len);
-    free (target);
+    memcpy (buf, wtarget, (len + 1) * sizeof (wchar_t));
+    free (wtarget);
     result = len;
   }
 #else
@@ -560,8 +564,7 @@ fail:
 
 
 ssize_t
-ntlink_readlink(const char *restrict path, char *restrict buf,
-    size_t bufsize)
+ntlink_readlink(const char *path, char *buf, size_t bufsize)
 {
   int ret;
   wchar_t *wpath = NULL;
@@ -608,7 +611,7 @@ ntlink_unlinkw(const wchar_t *wpath)
   WIN32_FIND_DATAW finddata;
   DWORD lerr;
 
-  exists = PathExistsW ((wchar_t *) wpath, &finddata);
+  exists = PathExistsW ((wchar_t *) wpath, &finddata, PATH_EXISTS_FLAG_NOTHING);
   if (exists <= 0)
   {
     /* path must exist */
@@ -713,7 +716,7 @@ int ntlink_renamew(const wchar_t *wpath1, const wchar_t *wpath2)
   if (stat1.st_ino != 0 && stat1.st_ino == stat2.st_ino)
     return 0;
 
-  exists = PathExistsW ((wchar_t *) wpath1, &finddata1);
+  exists = PathExistsW ((wchar_t *) wpath1, &finddata1, PATH_EXISTS_FLAG_NOTHING);
   if (exists <= 0)
   {
     /* path1 must exist */
@@ -724,7 +727,7 @@ int ntlink_renamew(const wchar_t *wpath1, const wchar_t *wpath2)
     goto fail;
   }
 
-  exists = PathExistsW ((wchar_t *) wpath2, &finddata2);
+  exists = PathExistsW ((wchar_t *) wpath2, &finddata2, PATH_EXISTS_FLAG_NOTHING);
   if (exists > 0)
   {
     /* If the old argument points to the pathname of a directory, the new argument shall not point to the pathname of a file that is not a directory. */
