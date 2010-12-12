@@ -2,8 +2,20 @@ EXESUF = exe
 SOSUF = dll
 ASUF = a
 INC_CFLAGS = $(CFLAGS)
-LIB_LDFLAGS = $(LDFLAGS)
+ifeq ($(WINDIR),)
+	ifeq ($(windir),)
+        	WDIR=
+	else
+        	WDIR=$(windir)
+	endif
+        
+else
+        WDIR=$(WINDIR)
+endif
+LIB_LDFLAGS = -L$(WDIR)/system32 $(LDFLAGS)
+LIB_LIBS = -lkernel32 $(LIBS)
 CC = gcc
+AR = ar
 SPEC_CFLAGS = $(ASM_CFLAGS) -I.
 ifdef DEBUG
 DEBUG_CFLAGS = $(SPEC_CFLAGS) -O0 -g
@@ -13,6 +25,7 @@ endif
 LOCAL_CFLAGS = $(DEBUG_CFLAGS) -fno-common -Wall -mms-bitfields -D_WIN32_WINNT=0x600
 NTLINK_SHARED = libntlink.$(SOSUF)
 NTLINK_STATIC = libntlink.$(ASUF)
+NTLINK_IMPORT = libntlink.$(SOSUF).$(ASUF)
 JUNC_NAME = junc.$(EXESUF)
 NTLINK_FILES = juncpoint.c quasisymlink.c misc.c extra_string.c
 NTLINK_HEADERS = quasisymlink.h juncpoint.h misc.h extra_string.h
@@ -43,34 +56,50 @@ endif
 %.o: %.c
 	$(CC) $(LOCAL_CFLAGS) -o $@ -c $<
 
+$(NTLINK_IMPORT): $(NTLINK_SHARED)
+
 $(NTLINK_SHARED): $(NTLINK_OBJECT_FILES)
 ifeq ($(ENV),mingw-cmd)
-	$(CC) -shared  $(NTLINK_OBJECT_FILES) $(LIB_LDFLAGS) -Wl,-soname,$(SONAME) -o $(NTLINK_SHARED) -Wl,--out-implib=$(CURDIR)\$(NTLINK_STATIC)
+	$(CC) -shared  $(NTLINK_OBJECT_FILES) $(LIB_LDFLAGS) -o $(NTLINK_SHARED) -Wl,--out-implib=$(CURDIR)\$(NTLINK_IMPORT) $(LIB_LIBS)
 else
-	$(CC) -shared  $(NTLINK_OBJECT_FILES) $(LIB_LDFLAGS) -Wl,-soname,$(SONAME) -o $(NTLINK_SHARED) -Wl,--out-implib=$(shell pwd -W)/$(NTLINK_STATIC)
+	$(CC) -shared  $(NTLINK_OBJECT_FILES) $(LIB_LDFLAGS) -o $(NTLINK_SHARED) -Wl,--out-implib=$(shell "pwd" "-W")/$(NTLINK_IMPORT) $(LIB_LIBS)
 endif
+
+$(NTLINK_STATIC): $(NTLINK_OBJECT_FILES)
+	$(AR) rcs $(NTLINK_STATIC) $(NTLINK_OBJECT_FILES)
 
 $(JUNC_NAME): $(NTLINK_STATIC) $(JUNC_OBJECT_FILES)
 ifeq ($(ENV),mingw-cmd)
-	$(CC) -static -o $(JUNC_NAME) $(JUNC_OBJECT_FILES) $(LIB_LDFLAGS) -L$(CURDIR) -lntlink
+	$(CC) -o $(JUNC_NAME) $(JUNC_OBJECT_FILES) $(LIB_LDFLAGS) $(DIRECT_DLL_LDFLAGS) -L$(CURDIR) -lntlink
 else
-	$(CC) -static -o $(JUNC_NAME) $(JUNC_OBJECT_FILES) $(LIB_LDFLAGS) -L$(shell pwd -W) -lntlink
+	$(CC) -o $(JUNC_NAME) $(JUNC_OBJECT_FILES) $(LIB_LDFLAGS) $(DIRECT_DLL_LDFLAGS) -L$(shell "pwd" "-W") -lntlink
 endif
 
-install: $(NTLINK_SHARED) $(JUNC_NAME)
-ifndef PREFIX
+install: $(NTLINK_SHARED) $(NTLINK_IMPORT) $(NTLINK_STATIC) $(JUNC_NAME)
+ifndef DESTDIR
 ifeq ($(ENV),mingw-cmd)
-	@echo Please use PREFIX=drive:\installation\directory to specify installation path
+	@echo Please use DESTDIR=drive:\installation\directory to specify installation path
 else
-	@echo Please use PREFIX=/installation/directory to specify installation path
+	@echo Please use DESTDIR=/installation/directory to specify installation path
 endif
 else
 ifeq ($(ENV),mingw-cmd)
-	@echo Installing as $(PREFIX)\$(NTLINK_SHARED)
-	cmd /C if NOT EXIST $(PREFIX) mkdir $(PREFIX)
-	cmd /C copy /Y $(NTLINK_SHARED) $(PREFIX)\$(NTLINK_SHARED)
+	@echo Installing as $(DESTDIR)\bin\$(NTLINK_SHARED)
+	cmd /C if NOT EXIST $(DESTDIR)\bin mkdir $(DESTDIR)\bin
+	cmd /C if NOT EXIST $(DESTDIR)\lib mkdir $(DESTDIR)\lib
+	cmd /C if NOT EXIST $(DESTDIR)\include\libntlink mkdir $(DESTDIR)\include\libntlink
+	cmd /C copy /Y $(NTLINK_SHARED) $(DESTDIR)\bin\$(NTLINK_SHARED)
+	cmd /C copy /Y $(NTLINK_STATIC) $(DESTDIR)\lib\$(NTLINK_STATIC)
+	cmd /C copy /Y $(NTLINK_IMPORT) $(DESTDIR)\lib\$(NTLINK_IMPORT)
+	cmd /C for %i in ($(NTLINK_HEADERS)) do copy /Y %i $(DESTDIR)\include\libntlink
 else
-	@echo Installing as $(PREFIX)/$(NTLINK_SHARED)
-	install -D $(NTLINK_SHARED) $(PREFIX)/$(NTLINK_SHARED)
+	@echo Installing as $(DESTDIR)/bin/$(NTLINK_SHARED)
+	mkdir -p $(DESTDIR)/bin
+	mkdir -p $(DESTDIR)/lib
+	mkdir -p $(DESTDIR)/include/libntlink
+	install -D $(NTLINK_SHARED) $(DESTDIR)/bin/$(NTLINK_SHARED)
+	install -D $(NTLINK_STATIC) $(DESTDIR)/lib/$(NTLINK_STATIC)
+	install -D $(NTLINK_IMPORT) $(DESTDIR)/lib/$(NTLINK_IMPORT)
+	install -D $(NTLINK_HEADERS) $(DESTDIR)/include/libntlink
 endif
 endif

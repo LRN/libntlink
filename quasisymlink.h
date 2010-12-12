@@ -23,6 +23,10 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifndef uid_t
   #define uid_t int
 #endif
@@ -81,5 +85,9 @@ ssize_t ntlink_readlinkw(const wchar_t *path, wchar_t *buf,
     size_t bufsize);
 int ntlink_unlinkw(const wchar_t *path);
 int ntlink_renamew(const wchar_t *path1, const wchar_t *path2);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __NTLINK_SYMLINK_H__ */

@@ -23,6 +23,10 @@
 #include <windows.h>
 #include <errno.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * PathExistsFlags:
  * @PATH_EXISTS_FLAG_NOTHING: default behaviour
@@ -64,5 +68,8 @@ int GetAbsName (wchar_t *relative, wchar_t **absolute);
   #define EIO          NTLINK_ERROR_BASE + 5
 #endif
 
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __NTLINK_MISC__ */
