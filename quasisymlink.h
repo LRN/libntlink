@@ -36,16 +36,34 @@ extern "C" {
 #endif
 
 #ifndef _S_IFLNK
-#define _S_IFLNK (_S_IFREG & _S_IFCHR)
+#define _S_IFLNK (_S_IFREG | _S_IFCHR)
 #endif
 #ifndef S_IFLNK
 #define S_IFLNK _S_IFLNK
 #endif
+#ifndef _S_IFJUN
+#define _S_IFJUN (_S_IFDIR | _S_IFCHR)
+#endif
+#ifndef S_IFJUN
+#define S_IFJUN _S_IFJUN
+#endif
 #ifndef _S_ISLNK
-#define _S_ISLNK(a) (a & _S_IFLNK)
+#define _S_ISLNK(a) (((a & _S_IFLNK) == _S_IFLNK) && !((a & _S_IFDIR) == _S_IFDIR))
 #endif
 #ifndef S_ISLNK
 #define S_ISLNK _S_ISLNK
+#endif
+#ifndef _S_ISDIRLNK
+#define _S_ISDIRLNK(a) (((a & _S_IFLNK) == _S_IFLNK) && ((a & _S_IFDIR) == _S_IFDIR))
+#endif
+#ifndef S_ISDIRLNK
+#define S_ISDIRLNK _S_ISDIRLNK
+#endif
+#ifndef _S_ISJUN
+#define _S_ISJUN(a) ((a & _S_IFJUN) == _S_IFJUN && !((a & _S_IFLNK) == _S_IFLNK))
+#endif
+#ifndef S_ISJUN
+#define S_ISJUN _S_ISJUN
 #endif
 
 #ifndef lstat
@@ -85,6 +103,25 @@ ssize_t ntlink_readlinkw(const wchar_t *path, wchar_t *buf,
     size_t bufsize);
 int ntlink_unlinkw(const wchar_t *path);
 int ntlink_renamew(const wchar_t *path1, const wchar_t *path2);
+
+/**
+ * SymlinkBlindType:
+ * @BLIND_SYMLINK_FILE: file symlink
+ * @BLIND_SYMLINK_DIR: directory symlink
+ * @BLIND_JUNCTION: directory junction
+ * @BLIND_HARDLINK: hardlink
+ *
+ * See ntlink_blind_symlinkw() for details.
+ */
+typedef enum
+{
+  BLIND_SYMLINK_FILE = 0x00000000,
+  BLIND_SYMLINK_DIR = 0x00000001,
+  BLIND_JUNCTION = 0x00000002,
+  BLIND_HARDLINK = 0x00000003
+} SymlinkBlindType;
+
+int ntlink_blind_symlinkw(const wchar_t *path1, const wchar_t *path2, SymlinkBlindType blindtype, wchar_t *basedir);
 
 #ifdef __cplusplus
 }

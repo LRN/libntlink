@@ -23,6 +23,34 @@
 
 #include <windows.h>
 #include <winioctl.h>
+#ifdef __MINGW64__
+typedef struct _REPARSE_DATA_BUFFER {
+  ULONG ReparseTag;
+  USHORT ReparseDataLength;
+  USHORT Reserved;
+  _ANONYMOUS_UNION union {
+    struct {
+      USHORT SubstituteNameOffset;
+      USHORT SubstituteNameLength;
+      USHORT PrintNameOffset;
+      USHORT PrintNameLength;
+      ULONG Flags;
+      WCHAR PathBuffer[1];
+    } SymbolicLinkReparseBuffer;
+    struct {
+      USHORT SubstituteNameOffset;
+      USHORT SubstituteNameLength;
+      USHORT PrintNameOffset;
+      USHORT PrintNameLength;
+      WCHAR PathBuffer[1];
+    } MountPointReparseBuffer;
+    struct {
+      UCHAR DataBuffer[1];
+    } GenericReparseBuffer;
+  } DUMMYUNIONNAME;
+} REPARSE_DATA_BUFFER, *PREPARSE_DATA_BUFFER;
+#define REPARSE_DATA_BUFFER_HEADER_SIZE   FIELD_OFFSET(REPARSE_DATA_BUFFER, GenericReparseBuffer)
+#endif
 
 #include "misc.h"
 #include "extra_string.h"
@@ -320,14 +348,19 @@ UnJuncPointW (wchar_t *path)
  * GetJuncPointW:
  * @path1: a pointer to variable (pointer to wchar_t) to receive result
  * @path2: full directory path (UTF-16)
+ * @relative: set to 1 if the path is relative. Always 0 for junction points.
+ * @linktype: set to 1 if the link is a symlink. 0 if a junction
  *
  * Retrieves target directory for junction point @path2, allocates a buffer
  * for it and writes a pointer to that buffer into @path1
-
+ *
  * @path2 must exist.
  * @path2 must be a junction point.
- * String in @path1 will be in unparseable form - with \??\ prefix
- * (i.e. \??\C:\Windows) - and without a trailing slash.
+ * For junction points:
+ *   String in @path1 will be in unparseable form - with \??\ prefix
+ *   (i.e. \??\C:\Windows) - and without a trailing slash.
+ * For symlinks:
+ *   String in @path1 will be in normal form.
  * If the function fails, *@path1 remains unmodified.
  * Free @path1 with free() when it is no longer needed.
  *
@@ -339,7 +372,7 @@ UnJuncPointW (wchar_t *path)
  *
  */
 int
-GetJuncPointW (wchar_t **path1, wchar_t *path2)
+GetJuncPointW (wchar_t **path1, wchar_t *path2, int *relative, int *linktype)
 {
   HANDLE dir_handle;
   BOOL ret;
@@ -360,24 +393,48 @@ GetJuncPointW (wchar_t **path1, wchar_t *path2)
   }
 
   ret = DeviceIoControl (dir_handle, FSCTL_GET_REPARSE_POINT, NULL, 0, returned_data, 1024, &returned_bytes, NULL);
+  CloseHandle (dir_handle);
   if (ret == 0)
   {
     return -2;
   }
 
-  CloseHandle (dir_handle);
-
   rep_buf = (REPARSE_DATA_BUFFER *) returned_data;
-  len1 = rep_buf->MountPointReparseBuffer.SubstituteNameLength;
 
-  *path1 = malloc (len1 + sizeof (wchar_t));
-  if (*path1 == NULL)
+  if (rep_buf->ReparseTag == IO_REPARSE_TAG_SYMLINK)
   {
-    return -3;
+    len1 = rep_buf->SymbolicLinkReparseBuffer.SubstituteNameLength;
+
+    *path1 = malloc (len1 + sizeof (wchar_t));
+    if (*path1 == NULL)
+    {
+      return -3;
+    }
+
+    if (relative)
+      *relative = (rep_buf->SymbolicLinkReparseBuffer.Flags & 0x0001) != 0;
+    if (linktype)
+      *linktype = 1;
+    memcpy (*path1, &((BYTE *) rep_buf->SymbolicLinkReparseBuffer.PathBuffer)
+        [rep_buf->SymbolicLinkReparseBuffer.SubstituteNameOffset], len1);
   }
-  
-  memcpy (*path1, &((BYTE *) rep_buf->MountPointReparseBuffer.PathBuffer)
-      [rep_buf->MountPointReparseBuffer.SubstituteNameOffset], len1);
+  else if (rep_buf->ReparseTag == IO_REPARSE_TAG_MOUNT_POINT)
+  {
+    len1 = rep_buf->MountPointReparseBuffer.SubstituteNameLength;
+
+    *path1 = malloc (len1 + sizeof (wchar_t));
+    if (*path1 == NULL)
+    {
+      return -3;
+    }
+
+    if (relative)
+      *relative = 0;
+    if (linktype)
+      *linktype = 0;
+    memcpy (*path1, &((BYTE *) rep_buf->MountPointReparseBuffer.PathBuffer)
+        [rep_buf->MountPointReparseBuffer.SubstituteNameOffset], len1);
+  }
 
   (*path1)[len1 / sizeof (wchar_t)] = 0;
 

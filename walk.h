@@ -1,6 +1,6 @@
 /*
  * This file is part of libntlink.
- * Copyright (c) 2010, LRN
+ * Copyright (c) 2011, LRN
  *
  * libntlink is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -17,22 +17,26 @@
  * along with libntlink.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef __NTLINK_JUNCPOINT_H__
-#define __NTLINK_JUNCPOINT_H__
+#include <stdio.h>
+#include <windows.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+enum WALK_FLAGS
+{
+  WALK_FLAG_NONE =                 0x00000000,
+  WALK_FLAG_DONT_FOLLOW_SYMLINKS = 0x00000001,
+  WALK_FLAG_DEPTH_FIRST =          0x00000002
+};
 
-int IsJunctionPointA (char *path);
-int IsJunctionPointW (wchar_t *path);
-int IsJunctionPointU (char *path);
-int SetJuncPointW (wchar_t *path1, wchar_t *path2);
-int UnJuncPointW (wchar_t *path);
-int GetJuncPointW (wchar_t **path1, wchar_t *path2, int *relative, int *linktype);
+struct _walk_iteratorw
+{
+  int depth;
+  wchar_t wdir[MAX_PATH];
+  int nitems;
+  WIN32_FIND_DATAW *items;
+};
 
-#ifdef __cplusplus
-}
-#endif
+typedef struct _walk_iteratorw walk_iteratorw;
 
-#endif /* __NTLINK_JUNCPOINT_H__ */
+walk_iteratorw *walk_allocw (wchar_t *root, wchar_t *wdir, unsigned flags);
+walk_iteratorw *walk_nextw (walk_iteratorw *iter);
+void freeiterw (walk_iteratorw *iter);

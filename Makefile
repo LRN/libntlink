@@ -1,7 +1,7 @@
 EXESUF = exe
 SOSUF = dll
 ASUF = a
-INC_CFLAGS = $(CFLAGS)
+ASM_CFLAGS = $(CFLAGS) $(INCLUDE)
 ifeq ($(WINDIR),)
 	ifeq ($(windir),)
         	WDIR=
@@ -27,11 +27,14 @@ NTLINK_SHARED = libntlink.$(SOSUF)
 NTLINK_STATIC = libntlink.$(ASUF)
 NTLINK_IMPORT = libntlink.$(SOSUF).$(ASUF)
 JUNC_NAME = junc.$(EXESUF)
-NTLINK_FILES = juncpoint.c quasisymlink.c misc.c extra_string.c
-NTLINK_HEADERS = quasisymlink.h juncpoint.h misc.h extra_string.h
+TRANSLINK_NAME = translink.$(EXESUF)
+NTLINK_FILES = juncpoint.c quasisymlink.c misc.c extra_string.c walk.c
+NTLINK_HEADERS = quasisymlink.h juncpoint.h misc.h extra_string.h walk.h
 JUNC_FILES = junc.c
+TRANSLINK_FILES = translink.c
 NTLINK_OBJECT_FILES = $(patsubst %.c,%.o,$(NTLINK_FILES))
 JUNC_OBJECT_FILES = $(patsubst %.c,%.o,$(JUNC_FILES))
+TRANSLINK_OBJECT_FILES = $(patsubst %.c,%.o,$(TRANSLINK_FILES))
 CD=$(shell cd)
 
 ifeq ($(OS),Windows_NT)
@@ -44,7 +47,7 @@ else
 	ENV = gnu
 endif
 
-all: $(NTLINK_SHARED) $(JUNC_NAME)
+all: $(NTLINK_SHARED) $(JUNC_NAME) $(TRANSLINK_NAME)
 
 clean:
 ifeq ($(ENV),mingw-cmd)
@@ -58,14 +61,14 @@ endif
 
 $(NTLINK_IMPORT): $(NTLINK_SHARED)
 
-$(NTLINK_SHARED): $(NTLINK_OBJECT_FILES)
+$(NTLINK_SHARED): $(NTLINK_OBJECT_FILES) $(NTLINK_HEADERS)
 ifeq ($(ENV),mingw-cmd)
 	$(CC) -shared  $(NTLINK_OBJECT_FILES) $(LIB_LDFLAGS) -o $(NTLINK_SHARED) -Wl,--out-implib=$(CURDIR)\$(NTLINK_IMPORT) $(LIB_LIBS)
 else
 	$(CC) -shared  $(NTLINK_OBJECT_FILES) $(LIB_LDFLAGS) -o $(NTLINK_SHARED) -Wl,--out-implib=$(shell "pwd" "-W")/$(NTLINK_IMPORT) $(LIB_LIBS)
 endif
 
-$(NTLINK_STATIC): $(NTLINK_OBJECT_FILES)
+$(NTLINK_STATIC): $(NTLINK_OBJECT_FILES) $(NTLINK_HEADERS)
 	$(AR) rcs $(NTLINK_STATIC) $(NTLINK_OBJECT_FILES)
 
 $(JUNC_NAME): $(NTLINK_STATIC) $(JUNC_OBJECT_FILES)
@@ -75,7 +78,15 @@ else
 	$(CC) -o $(JUNC_NAME) $(JUNC_OBJECT_FILES) $(LIB_LDFLAGS) $(DIRECT_DLL_LDFLAGS) -L$(shell "pwd" "-W") -lntlink
 endif
 
-install: $(NTLINK_SHARED) $(NTLINK_IMPORT) $(NTLINK_STATIC) $(JUNC_NAME)
+
+$(TRANSLINK_NAME): $(NTLINK_STATIC) $(TRANSLINK_OBJECT_FILES)
+ifeq ($(ENV),mingw-cmd)
+	$(CC) -municode -o $(TRANSLINK_NAME) $(TRANSLINK_OBJECT_FILES) $(LIB_LDFLAGS) $(DIRECT_DLL_LDFLAGS) -L$(CURDIR) -lntlink
+else
+	$(CC) -municode -o $(TRANSLINK_NAME) $(TRANSLINK_OBJECT_FILES) $(LIB_LDFLAGS) $(DIRECT_DLL_LDFLAGS) -L$(shell "pwd" "-W") -lntlink
+endif
+
+install: $(NTLINK_SHARED) $(NTLINK_IMPORT) $(NTLINK_STATIC) $(JUNC_NAME) $(TRANSLINK_NAME)
 ifndef DESTDIR
 ifeq ($(ENV),mingw-cmd)
 	@echo Please use DESTDIR=drive:\installation\directory to specify installation path

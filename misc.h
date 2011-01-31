@@ -31,7 +31,7 @@ extern "C" {
  * PathExistsFlags:
  * @PATH_EXISTS_FLAG_NOTHING: default behaviour
  * @PATH_EXISTS_FLAG_DONT_FOLLOW_SYMLINKS: don't resolve intermediate symlinks
- * @PATH_EXISTS_FLAG_DONT_FOLLOW_LAST_SYMLINK: don't resolve the last symlink
+ * @PATH_EXISTS_FLAG_FOLLOW_LAST_SYMLINK: resolve the last symlink
  *
  * See PathExistsW() for details.
  */
@@ -43,8 +43,10 @@ typedef enum
 } PathExistsFlags;
 
 int PathExistsW (wchar_t *path, WIN32_FIND_DATAW *finddata, PathExistsFlags flags);
+wchar_t *SimplifyAbsNameW (wchar_t *absolute, int normslashes);
 int IsAbsName (wchar_t *name);
-int GetAbsName (wchar_t *relative, wchar_t **absolute);
+int GetAbsNameW (wchar_t *relative, wchar_t **absolute, wchar_t *base, int simplify);
+int GetRelNameW (wchar_t *absolute, wchar_t **relative, wchar_t *base);
 
 #define NTLINK_ERROR_BASE 100
 

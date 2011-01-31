@@ -27,7 +27,7 @@
 #include "misc.h"
 #include "juncpoint.h"
 
-#ifdef __MINGW32__ /* Remove this once mingw32-w32api is updated */
+#ifndef __MINGW64__ /* Remove this once mingw32-w32api is updated */
 
 typedef struct _FILE_BASIC_INFO {
   LARGE_INTEGER CreationTime;
@@ -78,6 +78,113 @@ DWORD WINAPI GetFinalPathNameByHandleW(HANDLE hFile, LPWSTR lpszFilePath, DWORD 
 DWORD WINAPI GetFinalPathNameByHandleA(HANDLE hFile, LPSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags);
 #endif
 
+
+/* This is, basically, what mklink does */
+int
+ntlink_blind_symlinkw(const wchar_t *wpath1, const wchar_t *wpath2, SymlinkBlindType blindtype, wchar_t *basedir)
+{
+#if _WIN32_WINNT >= 0x0600
+  BOOL err;
+  DWORD lerr;
+#endif
+
+#if _WIN32_WINNT >= 0x0600
+  if (blindtype == BLIND_SYMLINK_FILE || blindtype == BLIND_SYMLINK_DIR)
+  {
+    SetLastError (0);
+    err = CreateSymbolicLinkW ((wchar_t *) wpath2, (wchar_t *) wpath1, blindtype != BLIND_SYMLINK_DIR ? 0 : SYMBOLIC_LINK_FLAG_DIRECTORY);
+    lerr = GetLastError ();
+    if (err == 0)
+    {
+      /* TODO: set errno properly from lerr */
+      errno = EIO;
+      goto fail;
+    }
+  } else
+#endif
+  if (blindtype == BLIND_SYMLINK_DIR || blindtype == BLIND_JUNCTION)
+  {
+    int err;
+    wchar_t *wpath1_unp = NULL;
+    /* Junctions are absolute-only, so first make sure the target is absolute. */
+    wchar_t *target = NULL;
+    if (blindtype == BLIND_SYMLINK_DIR)
+    {
+      /* Assume that target is relative to the link, not to the working directory! */
+      if (IsAbsName (wpath1))
+        target = wcsdup (wpath1);
+      else
+      {
+        target = malloc (sizeof (wchar_t) * (wcslen (wpath1) + 1 + 1 + wcslen (wpath2)));
+        swprintf (target, L"%s\\%s", wpath2, wpath1);
+      }
+    }
+    else
+    {
+      if (IsAbsName (wpath1))
+        target = wcsdup (wpath1);
+      else
+      {
+        target = NULL;
+        GetAbsNameW (wpath1, &target, basedir, 2);
+      }
+      /* Assume that target is relative to the base directory */
+    }
+    /* Create a junction point to target directory */
+    if (target != NULL)
+    {
+      wpath1_unp = malloc (sizeof (wchar_t) * (wcslen (target) + 1 + 4));
+      memcpy (wpath1_unp, L"\\??\\", sizeof (wchar_t) * 4);
+      memcpy (&wpath1_unp[4], target, (wcslen (target) + 1) * sizeof (wchar_t));
+      err = SetJuncPointW (wpath1_unp, wpath2);
+      free (wpath1_unp);
+      free (target);
+    }
+    else
+      err = -4;
+    switch (err)
+    {
+    case 0:
+      break;
+    case -1:
+      errno = EACCESS;
+      goto fail;
+      break;
+    case -2:
+      errno = ENOMEM;
+      goto fail;
+      break;
+    case -3:
+      errno = EIO;
+      goto fail;
+      break;
+    case -4:
+      errno = EINVAL;
+      goto fail;
+      break;
+    default:
+      break;
+    }
+  }
+  else if (blindtype == BLIND_SYMLINK_FILE || blindtype == BLIND_HARDLINK)
+  {
+    /* Create a hard link to target file */
+    /* FIXME: transform wpath1 from relative-to-wpath2 to absolute */
+    BOOL ret;
+    ret = CreateHardLinkW (wpath2, wpath1, NULL);
+    if (ret == 0)
+    {
+      errno = EIO;
+      goto fail;
+    }
+  }
+
+  return 0;
+fail:
+
+  return -1;
+}
+
 int  
 ntlink_symlinkw(const wchar_t *wpath1, const wchar_t *wpath2)
 {
@@ -113,7 +220,7 @@ ntlink_symlinkw(const wchar_t *wpath1, const wchar_t *wpath2)
 
 #if _WIN32_WINNT >= 0x0600
   SetLastError (0);
-  err = CreateSymbolicLinkW ((wchar_t *) wpath2, (wchar_t *) wpath1, (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ? 0 : SYMBOLIC_LINK_FLAG_DIRECTORY);
+  err = CreateSymbolicLinkW ((wchar_t *) wpath2, (wchar_t *) wpath1, (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ? 0 : SYMBOLIC_LINK_FLAG_DIRECTORY);
   lerr = GetLastError ();
   if (err == 0)
   {
@@ -292,7 +399,7 @@ ntlink_lstatw(const wchar_t *wpath, struct stat *buf)
   DWORD lerr;
 #endif
 
-  GetAbsName ((wchar_t *) wpath, &abswpath);
+  GetAbsNameW ((wchar_t *) wpath, &abswpath, NULL, 0);
 
   exists = PathExistsW ((wchar_t *) wpath, &finddata, PATH_EXISTS_FLAG_NOTHING);
   if (exists <= 0)
@@ -310,9 +417,10 @@ ntlink_lstatw(const wchar_t *wpath, struct stat *buf)
     FILE_BASIC_INFO bi;
     FILE_STANDARD_INFO stdi;
     BY_HANDLE_FILE_INFORMATION info;
+    int linktype = -1;
 
     SetLastError (0);
-    fileh = CreateFileW (wpath, 0, 0, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | (bi.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? FILE_FLAG_BACKUP_SEMANTICS : 0,
+    fileh = CreateFileW (wpath, 0, 0, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? FILE_FLAG_BACKUP_SEMANTICS : 0,
         NULL);
     lerr = GetLastError ();
     if (fileh == INVALID_HANDLE_VALUE)
@@ -323,14 +431,6 @@ ntlink_lstatw(const wchar_t *wpath, struct stat *buf)
     }
     SetLastError (0);
     if (GetFileInformationByHandle(fileh, &info) == 0)
-    {
-      lerr = GetLastError ();
-      /* TODO: set errno from GetLastError () */
-      errno = EIO;
-      goto fail;
-    }
-    SetLastError (0);
-    if (fileh == INVALID_HANDLE_VALUE)
     {
       lerr = GetLastError ();
       /* TODO: set errno from GetLastError () */
@@ -355,8 +455,27 @@ ntlink_lstatw(const wchar_t *wpath, struct stat *buf)
     }
     CloseHandle (fileh);
     fileh = NULL;
+
+    if (finddata.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+    {
+      wchar_t *wjptarget = NULL;
+      int len = 0;
+      int relative = 0;
+      int jpresult = GetJuncPointW (&wjptarget, abswpath, &relative, &linktype);
+      if (jpresult >= 0)
+      {
+        free (wjptarget);
+      }
+    }
+
     buf->st_gid = 0;
     buf->st_uid = 0;
+    /* I've found that none of the following functions will return attributes
+     * with FILE_ATTRIBUTE_REPARSE_POINT set, but GetFileAttributesW that is called by PathExistsW will.
+     * Because of that i will set FILE_ATTRIBUTE_REPARSE_POINT here from finddata.
+     */
+    if (finddata.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+      bi.FileAttributes |= FILE_ATTRIBUTE_REPARSE_POINT;
 /*
 #st_mode
 #
@@ -367,8 +486,19 @@ ntlink_lstatw(const wchar_t *wpath, struct stat *buf)
 */
     buf->st_nlink = stdi.NumberOfLinks;
     buf->st_mode = 0;
-    buf->st_mode |= bi.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT ? _S_IFLNK : 0;
-    buf->st_mode |= (bi.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !(bi.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ? _S_IFDIR : _S_IFREG;
+    /* 1 means a symlink, -1 means unknown (and we assume a symlink). 0 is a junction point */
+    if (linktype == 1 || linktype == -1)
+    {
+      buf->st_mode |= (bi.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ? _S_IFLNK : 0;
+      /* Why was it like that? I must have had a good reason. Still, with it directory symlinks won't get a directory attribute set. On Windows there IS
+       * a difference between directory symlinks and file symlinks, so this attribute IS needed to distinguish between the two */
+      /* buf->st_mode |= ((bi.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !(bi.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) ? _S_IFDIR : _S_IFREG; */
+      buf->st_mode |= (bi.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? _S_IFDIR : _S_IFREG;
+    }
+    else
+    {
+      buf->st_mode |= _S_IFJUN;
+    }
     buf->st_size = stdi.EndOfFile.QuadPart;
     buf->st_dev = buf->st_rdev = info.dwVolumeSerialNumber;
     buf->st_ino = ((info.nFileIndexHigh << sizeof(DWORD)) | info.nFileIndexLow);
@@ -376,20 +506,23 @@ ntlink_lstatw(const wchar_t *wpath, struct stat *buf)
 #ifdef _USE_32BIT_TIME_T
     buf->st_atime = bi.LastAccessTime;
     buf->st_ctime = bi.CreationTime;
-    buf->st_mtime = bi.LastWriteTime > bi.ChangeTime ? bi.LastWriteTime : bi.ChangeTime;
+    buf->st_mtime = (bi.LastWriteTime > bi.ChangeTime) ? bi.LastWriteTime : bi.ChangeTime;
 #else
     buf->st_atime = bi.LastAccessTime.LowPart;
     buf->st_ctime = bi.CreationTime.LowPart;
-    buf->st_mtime = bi.LastWriteTime.LowPart > bi.ChangeTime.LowPart ? bi.LastWriteTime.LowPart : bi.ChangeTime.LowPart;
+    buf->st_mtime = (bi.LastWriteTime.LowPart > bi.ChangeTime.LowPart) ? bi.LastWriteTime.LowPart : bi.ChangeTime.LowPart;
 #endif
   }
 #else
   if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
   {
-    /* Obtain juncpoint information and fill the buf */
-
+/* I probably forgot to implement pre-0x0600 version, which is why
+ * this code was here for some time.
+ */
+/* 
+    int relative = 0;
     wchar_t *jptarget = NULL;
-    int jpresult = GetJuncPointW (&jptarget, abswpath);
+    int jpresult = GetJuncPointW (&jptarget, abswpath, &relative);
     switch (jpresult)
     {
     case -1:
@@ -404,8 +537,88 @@ ntlink_lstatw(const wchar_t *wpath, struct stat *buf)
     default:
       ;
     }
-    buf->st_size = wcslen (jptarget);
     free (jptarget);
+*/
+    BY_HANDLE_FILE_INFORMATION info;
+    int linktype = -1;
+
+    SetLastError (0);
+    fileh = CreateFileW (wpath, 0, 0, NULL, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? FILE_FLAG_BACKUP_SEMANTICS : 0,
+        NULL);
+    lerr = GetLastError ();
+    if (fileh == INVALID_HANDLE_VALUE)
+    {
+      /* TODO: set errno from GetLastError() */
+      errno = EIO;
+      goto fail;
+    }
+    SetLastError (0);
+    if (GetFileInformationByHandle(fileh, &info) == 0)
+    {
+      lerr = GetLastError ();
+      /* TODO: set errno from GetLastError () */
+      errno = EIO;
+      goto fail;
+    }
+    CloseHandle (fileh);
+    fileh = NULL;
+
+    if (finddata.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+    {
+      wchar_t *wjptarget = NULL;
+      int len = 0;
+      int relative = 0;
+      int jpresult = GetJuncPointW (&wjptarget, abswpath, &relative, &linktype);
+      if (jpresult >= 0)
+      {
+        free (wjptarget);
+      }
+    }
+
+    buf->st_gid = 0;
+    buf->st_uid = 0;
+    /* I've found that none of the following functions will return attributes
+     * with FILE_ATTRIBUTE_REPARSE_POINT set, but GetFileAttributesW that is called by PathExistsW will.
+     * Because of that i will set FILE_ATTRIBUTE_REPARSE_POINT here from finddata.
+     */
+    if (finddata.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+      info.dwFileAttributes |= FILE_ATTRIBUTE_REPARSE_POINT;
+/*
+#st_mode
+#
+#    Bit mask for file-mode information. The _S_IFDIR bit is set if path specifies a directory;
+#    the _S_IFREG bit is set if path specifies an ordinary file or a device.
+#    User read/write bits are set according to the file's permission mode;
+#    user execute bits are set according to the filename extension.
+*/
+    buf->st_nlink = info.NumberOfLinks;
+    buf->st_mode = 0;
+    /* 1 means a symlink, -1 means unknown (and we assume a symlink). 0 is a junction point */
+    if (linktype == 1 || linktype == -1)
+    {
+      buf->st_mode |= (bi.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ? _S_IFLNK : 0;
+      /* Why was it like that? I must have had a good reason. Still, with it directory symlinks won't get a directory attribute set. On Windows there IS
+       * a difference between directory symlinks and file symlinks, so this attribute IS needed to distinguish between the two */
+      /* buf->st_mode |= ((bi.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) && !(bi.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) ? _S_IFDIR : _S_IFREG; */
+      buf->st_mode |= (bi.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? _S_IFDIR : _S_IFREG;
+    }
+    else
+    {
+      buf->st_mode |= _S_IFJUN;
+    }
+    buf->st_size = (info.nFileSizeHigh * (MAXDWORD + 1)) + info.nFileSizeLow;
+    buf->st_dev = buf->st_rdev = info.dwVolumeSerialNumber;
+    buf->st_ino = ((info.nFileIndexHigh << (sizeof(DWORD) * 8)) | info.nFileIndexLow);
+    /* buf->st_*time is either 32-bit or 64-bit integer */
+#ifdef _USE_32BIT_TIME_T
+    buf->st_atime = info.ftLastAccessTime.dwLowDateTime;
+    buf->st_ctime = info.ftCreationTime.dwLowDateTime;
+    buf->st_mtime = info.ftLastWriteTime.dwLowDateTime;
+#else
+    buf->st_atime = (info.ftLastAccessTime.dwHighDateTime << (sizeof(DWORD) * 8)) | info.ftLastAccessTime.dwLowDateTime;
+    buf->st_ctime = (info.ftCreationTime.dwHighDateTime << (sizeof(DWORD) * 8)) | info.ftCreationTime.dwLowDateTime;
+    buf->st_mtime = (info.ftLastWriteTime.dwHighDateTime << (sizeof(DWORD) * 8)) | info.ftLastWriteTime.dwLowDateTime;
+#endif
   }
   else if (finddata.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
   {
@@ -449,6 +662,9 @@ fail:
   return -1;
 }
 
+/*
+  bufsize and return value are in characters, not bytes
+ */
 ssize_t 
 ntlink_readlinkw(const wchar_t *wpath, wchar_t *buf,
     size_t bufsize)
@@ -463,7 +679,7 @@ ntlink_readlinkw(const wchar_t *wpath, wchar_t *buf,
   DWORD lerr;
 #endif
 
-  GetAbsName ((wchar_t *) wpath, &abswpath);
+  GetAbsNameW ((wchar_t *) wpath, &abswpath, NULL, 0);
 
   exists = PathExistsW ((wchar_t *) wpath, &finddata, PATH_EXISTS_FLAG_NOTHING);
   if (exists <= 0)
@@ -485,12 +701,13 @@ ntlink_readlinkw(const wchar_t *wpath, wchar_t *buf,
   }
   else
   {
+#if 0
     DWORD required_size, required_size2;
     char *target;
     int len = 0;
     int conv_result = 0;
     SetLastError (0);
-    fileh = CreateFileW (wpath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ? FILE_FLAG_BACKUP_SEMANTICS : 0, NULL);
+    fileh = CreateFileW (wpath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? FILE_FLAG_BACKUP_SEMANTICS : 0, NULL);
     if (fileh == INVALID_HANDLE_VALUE)
     {
       lerr = GetLastError ();
@@ -544,6 +761,33 @@ ntlink_readlinkw(const wchar_t *wpath, wchar_t *buf,
     memcpy (buf, wtarget, (len + 1) * sizeof (wchar_t));
     free (wtarget);
     result = len;
+#endif
+    wchar_t *wjptarget = NULL;
+    char *jptarget = NULL;
+    int len = 0;
+    int conv_result = 0;
+    int relative = 0;
+    int linktype = 0;
+    int jpresult = GetJuncPointW (&wjptarget, abswpath, &relative, &linktype);
+    switch (jpresult)
+    {
+    case -1:
+      errno = EACCESS;
+      goto fail;
+    case -2:
+      errno = EIO;
+      goto fail;
+    case -3:
+      errno = ENOMEM;
+      goto fail;
+    default:
+      ;
+    }
+    len = wcslen (wjptarget);
+    if (len > bufsize)
+      len = bufsize;
+    memcpy (buf, wjptarget, len * sizeof (wchar_t));
+    result = len;
   }
 #else
   if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
@@ -560,7 +804,9 @@ ntlink_readlinkw(const wchar_t *wpath, wchar_t *buf,
     char *jptarget = NULL;
     int len = 0;
     int conv_result = 0;
-    int jpresult = GetJuncPointW (&wjptarget, abswpath);
+    int relative = 0;
+    int linktype = 0;
+    int jpresult = GetJuncPointW (&wjptarget, abswpath, &relative, &linktype);
     switch (jpresult)
     {
     case -1:
@@ -575,14 +821,10 @@ ntlink_readlinkw(const wchar_t *wpath, wchar_t *buf,
     default:
       ;
     }
-    conv_result = wchartostr (wjptarget, &jptarget, CP_THREAD_ACP);
-    free (wjptarget);
-    if (conv_result < 0)
-      goto fail;
-    len = strlen (jptarget);
+    len = wcslen (wjptarget);
     if (len > bufsize)
       len = bufsize;
-    memcpy (buf, jptarget, len);
+    memcpy (buf, wjptarget, len * sizeof (wchar_t));
     result = len;
   }
   else if (finddata.dwFileAttributes & FILE_ATTRIBUTE_NORMAL)
@@ -670,7 +912,7 @@ ntlink_unlinkw(const wchar_t *wpath)
       errno = ENOENT;
     else
       errno = EACCESS;
-    goto fail;
+    return -1;
   }
   if (finddata.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
   {
@@ -685,8 +927,9 @@ ntlink_unlinkw(const wchar_t *wpath)
     {
       /* TODO: Set errno from lerr */
       errno = EIO;
-      goto fail;
+      return -1;
     }
+    return 0;
 #if 0
   } else if (finddata.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))
   {
@@ -717,16 +960,13 @@ ntlink_unlinkw(const wchar_t *wpath)
   }
   else if (~finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
   {
-    _wunlink (wpath);
+    return _wunlink (wpath);
   }
   else if (finddata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
   {
-    _wrmdir (wpath);
+    return _wrmdir (wpath);
   }
-
   return 0;
-fail:
-  return -1;
 }
 
 
