@@ -27,56 +27,6 @@
 #include "misc.h"
 #include "juncpoint.h"
 
-#ifndef __MINGW64__ /* Remove this once mingw32-w32api is updated */
-
-typedef struct _FILE_BASIC_INFO {
-  LARGE_INTEGER CreationTime;
-  LARGE_INTEGER LastAccessTime;
-  LARGE_INTEGER LastWriteTime;
-  LARGE_INTEGER ChangeTime;
-  DWORD         FileAttributes;
-} FILE_BASIC_INFO, *PFILE_BASIC_INFO;
-
-typedef struct _FILE_STANDARD_INFO {
-  LARGE_INTEGER AllocationSize;
-  LARGE_INTEGER EndOfFile;
-  DWORD          NumberOfLinks;
-  BOOL           DeletePending;
-  BOOL           Directory;
-} FILE_STANDARD_INFO, *PFILE_STANDARD_INFO;
-
-typedef enum _FILE_INFO_BY_HANDLE_CLASS {
-  FileBasicInfo,
-  FileStandardInfo,
-  FileNameInfo,
-  FileRenameInfo,
-  FileDispositionInfo,
-  FileAllocationInfo,
-  FileEndOfFileInfo,
-  FileStreamInfo,
-  FileCompressionInfo,
-  FileAttributeTagInfo,
-  FileIdBothDirectoryInfo,
-  FileIdBothDirectoryRestartInfo,
-  FileIoPriorityHintInfo,
-  FileRemoteProtocolInfo,
-  MaximumFileInfoByHandlesClass
-} FILE_INFO_BY_HANDLE_CLASS,*PFILE_INFO_BY_HANDLE_CLASS;
-
-WINBASEAPI BOOL WINAPI CreateSymbolicLinkW(LPWSTR,LPWSTR,DWORD);
-WINBASEAPI BOOL WINAPI GetFileInformationByHandleEx(HANDLE,FILE_INFO_BY_HANDLE_CLASS,LPVOID,DWORD);
-
-#define SYMBOLIC_LINK_FLAG_DIRECTORY 0x1
-#define FILE_NAME_NORMALIZED 0x0
-#define FILE_NAME_OPENED 0x8
-#define VOLUME_NAME_DOS 0x0
-#define VOLUME_NAME_GUID 0x1
-#define VOLUME_NAME_NONE 0x4
-#define VOLUME_NAME_NT 0x2
-
-DWORD WINAPI GetFinalPathNameByHandleW(HANDLE hFile, LPWSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags);
-DWORD WINAPI GetFinalPathNameByHandleA(HANDLE hFile, LPSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags);
-#endif
 
 
 /* This is, basically, what mklink does */

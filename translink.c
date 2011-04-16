@@ -101,7 +101,7 @@ int backup_links (wchar_t *basedir, wchar_t *name, FILE *f, int dry, int recursi
   }
   else if (isdir && recursive)
   {
-    int i, cleanup = 0;
+    int i;
     wchar_t tmp[MAX_PATH];
     walk_iteratorw *walker;
     int wlen = wcslen (absname);
@@ -131,7 +131,7 @@ int restore_links (wchar_t *basedir, wchar_t *name, FILE *f, int dry)
 {
   if (f == NULL)
     f = stdin;
-  int b, c, go = 1;
+  int b;
   wchar_t magic[6];
   magic[5] = L'\0';
   while (1)
@@ -240,13 +240,37 @@ Options:\n\
 ", argv[0]);
 }
 
+int wmain (int argc, wchar_t **argv);
+
+#if defined(__MINGW32__) && !defined(__MINGW64__)
+int
+main (int argc, char **argv)
+{
+   LPWSTR *szArglist;
+   int nArgs;
+   int r;
+
+   szArglist = CommandLineToArgvW(GetCommandLineW(), &nArgs);
+   if( NULL == szArglist )
+   {
+      fwprintf(stderr, L"CommandLineToArgvW failed\n");
+      return -1;
+   }
+   else
+     r = wmain (nArgs, szArglist);
+
+   LocalFree(szArglist);
+
+   return r;
+}
+#endif
+
 int
 wmain (int argc, wchar_t **argv)
 {
   FILE *f = NULL;
   int dry = 0;
   int recursive = 0;
-  int count = 0;
   int reljunc = 0;
   if (argc < 4)
   {
